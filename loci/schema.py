@@ -1,0 +1,80 @@
+"""Core data model for Loci — the WorldState dataclass."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class WorldState:
+    """A single spatiotemporal embedding with a 4D address.
+
+    Every vector stored in Loci has a position in (x, y, z, t) space
+    plus an arbitrary-dimension embedding vector produced by a world model.
+
+    Attributes:
+        x: Normalised spatial coordinate in [0, 1].
+        y: Normalised spatial coordinate in [0, 1].
+        z: Normalised spatial coordinate in [0, 1].
+        timestamp_ms: Unix epoch timestamp in milliseconds.
+        vector: Embedding vector (e.g. 512-d, 1024-d, 1408-d).  Note: with
+            ``distance="cosine"`` Qdrant stores unit-normalised float32
+            vectors, so vectors returned from queries may differ from the
+            inserted values by normalisation and precision.
+        scene_id: Optional scene/environment identifier.
+        scale_level: Granularity — ``"patch"``, ``"frame"``, or ``"sequence"``.
+        confidence: Confidence score for this state, in [0, 1].
+        metadata: Arbitrary caller-supplied key/value payload, stored and
+            returned verbatim. Must be JSON-serializable for Qdrant backends.
+        prev_state_id: ID of the causally preceding state (populated after insert).
+        next_state_id: ID of the causally following state (populated after insert).
+        id: Unique identifier assigned by the store on insert.
+    """
+
+    # 4D spatiotemporal address
+    x: float
+    y: float
+    z: float
+    timestamp_ms: int
+
+    # embedding
+    vector: list[float]
+
+    # optional metadata
+    scene_id: str = ""
+    scale_level: str = "patch"
+    confidence: float = 1.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    # causal links (populated by the store after insert)
+    prev_state_id: str | None = None
+    next_state_id: str | None = None
+
+    # store-assigned id
+    id: str = field(default="", repr=False)
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.x <= 1.0):
+            raise ValueError(f"x must be in [0, 1], got {self.x}")
+        if not (0.0 <= self.y <= 1.0):
+            raise ValueError(f"y must be in [0, 1], got {self.y}")
+        if not (0.0 <= self.z <= 1.0):
+            raise ValueError(f"z must be in [0, 1], got {self.z}")
+        if not (0.0 <= self.confidence <= 1.0):
+            raise ValueError(f"confidence must be in [0, 1], got {self.confidence}")
+        if self.timestamp_ms < 0:
+            raise ValueError(f"timestamp_ms must be non-negative, got {self.timestamp_ms}")
+        if self.scale_level not in ("patch", "frame", "sequence"):
+            raise ValueError(
+                f"scale_level must be 'patch', 'frame', or 'sequence', got {self.scale_level!r}"
+            )
+
+
+@dataclass
+class ScoredWorldState:
+    """A WorldState paired with raw and decay-weighted retrieval scores."""
+
+    state: WorldState
+    score: float
+    decayed_score: float
