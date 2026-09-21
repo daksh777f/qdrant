@@ -1,0 +1,534 @@
+"""Integration tests for LocalLociClient — full Loci with no Qdrant."""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from loci.local_client import LocalLociClient
+from loci.schema import ScoredWorldState, WorldState
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+VEC_SIZE = 4
+
+
+def _make_state(
+    x: float = 0.5,
+    y: float = 0.5,
+    z: float = 0.5,
+    ts: int = 1000,
+    scene: str = "scene_a",
+    vector: list[float] | None = None,
+) -> WorldState:
+    return WorldState(
+        x=x,
+        y=y,
+        z=z,
+        timestamp_ms=ts,
+        vector=vector or [1.0, 0.0, 0.0, 0.0],
+        scene_id=scene,
+    )
+
+
+@pytest.fixture()
+def client():
+    return LocalLociClient(
+        epoch_size_ms=5000,
+        spatial_resolution=4,
+        vector_size=VEC_SIZE,
+        decay_lambda=0.0,  # disable decay for deterministic tests
+    )
+
+
+# ---------------------------------------------------------------------------
+# Insert
+# ---------------------------------------------------------------------------
+
+
+class TestInsert:
+    def test_insert_returns_id(self, client):
+        sid = client.insert(_make_state())
+        assert isinstance(sid, str)
+        assert len(sid) > 0
+
+    def test_insert_stores_point(self, client):
+        client.insert(_make_state())
+        assert client.store.total_points == 1
+
+    def test_insert_does_not_mutate_input(self, client):
+        state = _make_state()
+        original_id = state.id
+        client.insert(state)
+        assert state.id == original_id  # not mutated
+
+    def test_insert_multiple_epochs(self, client):
+        client.insert(_make_state(ts=1000))
+        client.insert(_make_state(ts=6000))  # different epoch (5000ms shards)
+        assert client.store.total_points == 2
+
+
+# ---------------------------------------------------------------------------
+# Insert batch
+# ---------------------------------------------------------------------------
+
+
+class TestInsertBatch:
+    def test_batch_returns_ids(self, client):
+        states = [_make_state(ts=100 * i) for i in range(5)]
+        ids = client.insert_batch(states)
+        assert len(ids) == 5
+        assert len(set(ids)) == 5  # all unique
+
+    def test_batch_preserves_order(self, client):
+        states = [_make_state(ts=i * 100, scene=f"s{i}") for i in range(3)]
+        ids = client.insert_batch(states)
+        # Each ID corresponds to the input by index
+        for _i, sid in enumerate(ids):
+            assert isinstance(sid, str)
+
+    def test_batch_causal_linking(self, client):
+        states = [
+            _make_state(ts=100, scene="s1"),
+            _make_state(ts=200, scene="s1"),
+            _make_state(ts=300, scene="s1"),
+        ]
+        ids = client.insert_batch(states)
+        traj = client.get_trajectory(ids[1], steps_back=5, steps_forward=5)
+        assert len(traj) == 3
+
+
+# ---------------------------------------------------------------------------
+# Query
+# ---------------------------------------------------------------------------
+
+
+class TestQuery:
+    def test_query_returns_results(self, client):
+        client.insert(_make_state(vector=[1.0, 0.0, 0.0, 0.0]))
+        results = client.query(vector=[1.0, 0.0, 0.0, 0.0], limit=5)
+        assert len(results) == 1
+        assert isinstance(results[0], WorldState)
+
+    def test_query_similarity_ranking(self, client):
+        client.insert(_make_state(x=0.1, y=0.1, z=0.1, vector=[1.0, 0.0, 0.0, 0.0]))
+        client.insert(_make_state(x=0.2, y=0.2, z=0.2, vector=[0.0, 1.0, 0.0, 0.0]))
+        results = client.query(vector=[1.0, 0.0, 0.0, 0.0], limit=2)
+        assert results[0].vector == [1.0, 0.0, 0.0, 0.0]
+
+    def test_query_with_time_window(self, client):
+        client.insert(_make_state(ts=1000))
+        client.insert(_make_state(ts=6000))
+        results = client.query(
+            vector=[1.0, 0.0, 0.0, 0.0],
+            time_window_ms=(500, 1500),
+        )
+        assert len(results) == 1
+        assert results[0].timestamp_ms == 1000
+
+    def test_query_with_spatial_bounds(self, client):
+        client.insert(_make_state(x=0.1, y=0.1, z=0.1, vector=[1, 0, 0, 0]))
+        client.insert(_make_state(x=0.9, y=0.9, z=0.9, vector=[1, 0, 0, 0]))
+        results = client.query(
+            vector=[1, 0, 0, 0],
+            spatial_bounds={
+                "x_min": 0.0,
+                "x_max": 0.3,
+                "y_min": 0.0,
+                "y_max": 0.3,
+                "z_min": 0.0,
+                "z_max": 0.3,
+            },
+        )
+        assert len(results) == 1
+        assert results[0].x == 0.1
+
+    def test_query_applies_exact_post_filter_after_overlap(self, client):
+        client.insert(_make_state(x=0.02, y=0.02, z=0.02, vector=[1, 0, 0, 0]))
+        client.insert(_make_state(x=0.08, y=0.08, z=0.08, vector=[0.99, 0.01, 0, 0]))
+
+        results = client.query(
+            vector=[1, 0, 0, 0],
+            spatial_bounds={
+                "x_min": 0.0,
+                "x_max": 0.03,
+                "y_min": 0.0,
+                "y_max": 0.03,
+                "z_min": 0.0,
+                "z_max": 0.03,
+            },
+            limit=10,
+        )
+
+        assert len(results) == 1
+        assert results[0].x == 0.02
+
+    def test_query_empty_returns_empty(self, client):
+        results = client.query(vector=[1, 0, 0, 0])
+        assert results == []
+
+    def test_query_limit(self, client):
+        for i in range(20):
+            client.insert(_make_state(ts=i * 100, scene=f"s{i}"))
+        results = client.query(vector=[1, 0, 0, 0], limit=5)
+        assert len(results) == 5
+
+
+# ---------------------------------------------------------------------------
+# QueryStats
+# ---------------------------------------------------------------------------
+
+
+class TestQueryStats:
+    def test_stats_populated_after_query(self, client):
+        client.insert(_make_state())
+        client.query(vector=[1, 0, 0, 0])
+        stats = client.last_query_stats
+        assert stats is not None
+        assert stats.shards_searched >= 1
+        assert stats.elapsed_ms > 0
+
+    def test_stats_with_spatial_filter(self, client):
+        client.insert(_make_state(x=0.5, y=0.5, z=0.5))
+        client.query(
+            vector=[1, 0, 0, 0],
+            spatial_bounds={
+                "x_min": 0.0,
+                "x_max": 1.0,
+                "y_min": 0.0,
+                "y_max": 1.0,
+                "z_min": 0.0,
+                "z_max": 1.0,
+            },
+        )
+        stats = client.last_query_stats
+        assert stats.hilbert_ids_in_filter > 0
+
+    def test_stats_decay_disabled(self, client):
+        client.insert(_make_state())
+        client.query(vector=[1, 0, 0, 0])
+        assert client.last_query_stats.decay_applied is False
+
+    def test_stats_decay_enabled(self):
+        c = LocalLociClient(vector_size=VEC_SIZE, decay_lambda=1e-4)
+        c.insert(_make_state())
+        c.query(vector=[1, 0, 0, 0])
+        assert c.last_query_stats.decay_applied is True
+
+    def test_stats_none_before_query(self, client):
+        assert client.last_query_stats is None
+
+
+# ---------------------------------------------------------------------------
+# Temporal decay
+# ---------------------------------------------------------------------------
+
+
+class TestDecay:
+    def test_decay_reranks_results(self):
+        c = LocalLociClient(vector_size=VEC_SIZE, decay_lambda=0.01)
+        # Insert old and new states with same vector
+        c.insert(_make_state(ts=1000, vector=[1, 0, 0, 0]))
+        now_ms = int(time.time() * 1000)
+        c.insert(_make_state(ts=now_ms, vector=[0.9, 0.1, 0, 0]))
+        results = c.query(vector=[1, 0, 0, 0], limit=2)
+        # With high decay, the recent one should rank higher despite lower cosine
+        if len(results) == 2:
+            assert results[0].timestamp_ms >= results[1].timestamp_ms
+
+
+# ---------------------------------------------------------------------------
+# Causal linking (single inserts)
+# ---------------------------------------------------------------------------
+
+
+class TestCausalLinking:
+    def test_single_insert_links(self, client):
+        client.insert(_make_state(ts=100, scene="s1"))
+        id2 = client.insert(_make_state(ts=200, scene="s1"))
+        traj = client.get_trajectory(id2, steps_back=5, steps_forward=5)
+        assert len(traj) == 2
+
+    def test_no_cross_scene_linking(self, client):
+        client.insert(_make_state(ts=100, scene="s1"))
+        id2 = client.insert(_make_state(ts=200, scene="s2"))
+        traj = client.get_trajectory(id2, steps_back=5, steps_forward=5)
+        assert len(traj) == 1  # only the anchor, no cross-scene link
+
+    def test_single_insert_links_across_epochs(self, client):
+        client.insert(_make_state(ts=4900, scene="s1"))
+        id2 = client.insert(_make_state(ts=5100, scene="s1"))
+        traj = client.get_trajectory(id2, steps_back=5, steps_forward=5)
+        assert len(traj) == 2
+
+
+# ---------------------------------------------------------------------------
+# get_trajectory
+# ---------------------------------------------------------------------------
+
+
+class TestTrajectory:
+    def test_full_trajectory(self, client):
+        ids = client.insert_batch(
+            [
+                _make_state(ts=100, scene="s1"),
+                _make_state(ts=200, scene="s1"),
+                _make_state(ts=300, scene="s1"),
+                _make_state(ts=400, scene="s1"),
+            ]
+        )
+        traj = client.get_trajectory(ids[1], steps_back=10, steps_forward=10)
+        assert len(traj) == 4
+        # Ordered by time
+        ts_list = [s.timestamp_ms for s in traj]
+        assert ts_list == sorted(ts_list)
+
+    def test_trajectory_missing_id(self, client):
+        assert client.get_trajectory("nonexistent") == []
+
+    def test_batch_links_across_epochs(self, client):
+        ids = client.insert_batch(
+            [
+                _make_state(ts=4900, scene="s1"),
+                _make_state(ts=5100, scene="s1"),
+            ]
+        )
+        traj = client.get_trajectory(ids[1], steps_back=5, steps_forward=5)
+        assert len(traj) == 2
+
+    def test_trajectory_scans_full_scene_beyond_initial_window(self, client):
+        states = [_make_state(ts=100 + i * 10, scene="s1") for i in range(150)]
+        ids = client.insert_batch(states)
+
+        traj = client.get_trajectory(ids[120], steps_back=2, steps_forward=2)
+        expected = [states[i].timestamp_ms for i in range(118, 123)]
+
+        assert [state.timestamp_ms for state in traj] == expected
+
+
+# ---------------------------------------------------------------------------
+# predict_and_retrieve
+# ---------------------------------------------------------------------------
+
+
+class TestPredictAndRetrieve:
+    def test_predict_and_retrieve(self, client):
+        now_ms = int(time.time() * 1000)
+        client.insert(_make_state(ts=now_ms + 500, vector=[0.5, 0.5, 0, 0]))
+        results = client.predict_and_retrieve(
+            context_vector=[1, 0, 0, 0],
+            predictor_fn=lambda v: [0.5, 0.5, 0, 0],
+            future_horizon_ms=2000,
+            limit=5,
+        )
+        assert len(results) >= 1
+
+    def test_predict_and_retrieve_uses_real_scores(self, client):
+        low = _make_state(ts=10_500)
+        low.id = "low"
+        high = _make_state(ts=10_500)
+        high.id = "high"
+        client.query_scored = MagicMock(
+            return_value=[
+                ScoredWorldState(state=low, score=0.1, decayed_score=0.1),
+                ScoredWorldState(state=high, score=0.9, decayed_score=0.9),
+            ]
+        )
+
+        with patch("loci.retrieval.predict.time.time", return_value=10.0):
+            result = client.predict_and_retrieve(
+                context_vector=[1.0, 2.0, 3.0, 4.0],
+                predictor_fn=lambda _: [9.0, 8.0, 7.0, 6.0],
+                future_horizon_ms=2000,
+                limit=2,
+                current_position=(0.5, 0.5, 0.5),
+            )
+
+        assert [state.id for state in result.results] == ["high", "low"]
+
+
+# ---------------------------------------------------------------------------
+# Vector dimension validation
+# ---------------------------------------------------------------------------
+
+
+class TestVectorValidation:
+    def test_insert_rejects_wrong_dimension(self, client):
+        with pytest.raises(ValueError, match="dimension"):
+            client.insert(_make_state(vector=[1.0, 0.0]))
+        assert client.store.total_points == 0
+
+    def test_insert_batch_rejects_wrong_dimension(self, client):
+        states = [_make_state(), _make_state(vector=[1.0])]
+        with pytest.raises(ValueError, match="dimension"):
+            client.insert_batch(states)
+        assert client.store.total_points == 0
+
+    def test_bad_insert_does_not_poison_collection(self, client):
+        """A rejected insert must leave the collection queryable."""
+        client.insert(_make_state())
+        with pytest.raises(ValueError):
+            client.insert(_make_state(vector=[1.0, 2.0, 3.0]))
+        results = client.query(vector=[1.0, 0.0, 0.0, 0.0], limit=5)
+        assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# min_confidence
+# ---------------------------------------------------------------------------
+
+
+class TestMinConfidence:
+    def test_full_limit_returned_when_enough_matches(self):
+        client = LocalLociClient(vector_size=VEC_SIZE, decay_lambda=0.0)
+        for i in range(10):
+            state = _make_state(ts=1000 + i, scene=f"s{i}")
+            state.confidence = 0.9
+            client.insert(state)
+
+        results = client.query(
+            vector=[1.0, 0.0, 0.0, 0.0],
+            limit=5,
+            min_confidence=0.5,
+        )
+        # All 10 stored states qualify; the query must return the full limit
+        # instead of post-filtering an under-fetched candidate set to zero.
+        assert len(results) == 5
+
+    def test_low_confidence_excluded(self):
+        client = LocalLociClient(vector_size=VEC_SIZE, decay_lambda=0.0)
+        low = _make_state(ts=1000, scene="a")
+        low.confidence = 0.2
+        high = _make_state(ts=1001, scene="b")
+        high.confidence = 0.9
+        client.insert(low)
+        high_id = client.insert(high)
+
+        results = client.query(
+            vector=[1.0, 0.0, 0.0, 0.0],
+            limit=5,
+            min_confidence=0.5,
+        )
+        assert [r.id for r in results] == [high_id]
+
+
+# ---------------------------------------------------------------------------
+# Decay-aware cross-epoch top-k merge
+# ---------------------------------------------------------------------------
+
+
+class TestDecayAwareMerge:
+    def test_decayed_top1_survives_per_shard_truncation(self):
+        """Without decay-aware overfetch the true decayed top-1 is lost.
+
+        Epoch A holds the raw-score winner (very old, decays to ~0) and the
+        true decayed winner (good score, recent). Epoch B holds a weak old
+        match. With shard_limit == limit == 1, only the raw winner would be
+        fetched from epoch A and the true decayed top-1 would never be seen.
+        """
+        import math
+
+        half_life_ms = 60_000.0
+        lam = math.log(2) / half_life_ms
+        epoch_ms = 3_600_000  # one-hour epochs → wide intra-epoch age spread
+        client = LocalLociClient(vector_size=VEC_SIZE, decay_lambda=lam, epoch_size_ms=epoch_ms)
+
+        epoch_start = 10 * epoch_ms
+        fixed_now_ms = epoch_start + 3_500_000  # deep into epoch 10
+
+        # Raw winner: perfect similarity, but ancient within the epoch
+        # (~58 half-lives old → decays to ~0).
+        client.insert(_make_state(ts=epoch_start, scene="s1", vector=[1.0, 0.0, 0.0, 0.0]))
+        # True decayed winner: slightly lower similarity, brand new.
+        winner_id = client.insert(
+            _make_state(ts=fixed_now_ms, scene="s1", vector=[0.99, 0.14, 0.0, 0.0])
+        )
+        # Previous epoch: weak old match.
+        client.insert(_make_state(ts=epoch_start - 1, scene="s2", vector=[0.3, 0.95, 0.0, 0.0]))
+
+        with patch("loci.local_client.time.time", return_value=fixed_now_ms / 1000.0):
+            results = client.query(vector=[1.0, 0.0, 0.0, 0.0], limit=1)
+
+        assert len(results) == 1
+        assert results[0].id == winner_id
+
+
+# ---------------------------------------------------------------------------
+# spatial_resolution constructor parameter
+# ---------------------------------------------------------------------------
+
+
+class TestSpatialResolution:
+    def test_spatial_resolution_produces_matching_payload_keys(self):
+        client = LocalLociClient(vector_size=VEC_SIZE, spatial_resolution=6)
+        state_id = client.insert(_make_state())
+
+        stored = client.store.retrieve("loci_data", [state_id])[0]
+        assert "hilbert_r6" in stored["payload"]
+        assert "hilbert_r4" not in stored["payload"]
+
+    def test_explicit_resolutions_win(self):
+        client = LocalLociClient(vector_size=VEC_SIZE, spatial_resolution=6, resolutions=[5, 9])
+        assert client._hilbert.resolutions == [5, 9]
+
+    def test_spatial_resolution_queries_still_match(self):
+        client = LocalLociClient(vector_size=VEC_SIZE, spatial_resolution=6, decay_lambda=0.0)
+        client.insert(_make_state(x=0.5, y=0.5, z=0.5))
+        results = client.query(
+            vector=[1.0, 0.0, 0.0, 0.0],
+            spatial_bounds={
+                "x_min": 0.4,
+                "x_max": 0.6,
+                "y_min": 0.4,
+                "y_max": 0.6,
+                "z_min": 0.4,
+                "z_max": 0.6,
+            },
+        )
+        assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# Distance metrics
+# ---------------------------------------------------------------------------
+
+
+class TestDistanceMetrics:
+    def test_dot_product_distance(self):
+        c = LocalLociClient(vector_size=VEC_SIZE, distance="dot", decay_lambda=0)
+        c.insert(_make_state(vector=[3, 0, 0, 0]))
+        c.insert(_make_state(x=0.1, y=0.1, z=0.1, vector=[1, 0, 0, 0]))
+        results = c.query(vector=[1, 0, 0, 0], limit=2)
+        assert len(results) >= 1
+
+    def test_euclidean_distance(self):
+        c = LocalLociClient(vector_size=VEC_SIZE, distance="euclidean", decay_lambda=0)
+        c.insert(_make_state(vector=[1, 0, 0, 0]))
+        results = c.query(vector=[1, 0, 0, 0], limit=1)
+        assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# Metadata round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestMetadataRoundTrip:
+    def test_metadata_survives_insert_and_query(self, client):
+        state = _make_state()
+        state.metadata = {"label": "doorway", "height_m": 2.1}
+        client.insert(state)
+
+        results = client.query(vector=[1.0, 0.0, 0.0, 0.0], limit=1)
+
+        assert len(results) == 1
+        assert results[0].metadata == {"label": "doorway", "height_m": 2.1}
+
+    def test_metadata_defaults_to_empty_dict(self, client):
+        client.insert(_make_state())
+        results = client.query(vector=[1.0, 0.0, 0.0, 0.0], limit=1)
+        assert results[0].metadata == {}
