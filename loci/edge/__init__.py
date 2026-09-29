@@ -10,7 +10,7 @@ from loci.edge.cloud import CloudStore, Link, LinkDown, LocalCloud
 from loci.edge.ids import content_hash, memory_id
 from loci.edge.outbox import Outbox
 from loci.edge.store import EdgeMemoryStore, Memory, SearchHit
-from loci.edge.sync import PushReport, SyncEngine
+from loci.edge.sync import PullReport, PushReport, SyncEngine
 
 __all__ = [
     "CloudStore",
@@ -20,6 +20,7 @@ __all__ = [
     "LocalCloud",
     "Memory",
     "Outbox",
+    "PullReport",
     "PushReport",
     "SearchHit",
     "SyncEngine",

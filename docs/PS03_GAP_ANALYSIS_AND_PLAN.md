@@ -147,6 +147,16 @@ device roster, chaos suite (keep one convergence test + one netsplit test), dock
 
 Schedule rule: UI must show *something real* by Day 6; polish is not left to the last day.
 
+### Progress log
+- **P0 done** (`loci/edge/`): Edge store, SQLite outbox, `LocalCloud`, idempotent push.
+- **P1 done** (`loci/backends/edge.py`, `EdgeMemoryStore` mirror shard): the whole test suite passes on both the
+  numpy and the Edge backend (`LOCI_TEST_BACKEND=edge pytest tests`), 713 passed / 10 skipped each. Hybrid search
+  now spans writable shard + fleet mirror; delta pull lets robot B find what robot A saw. Measured (synthetic,
+  50k x 384-d, HNSW built): dense p50 2.3 ms / p95 3.3 ms, hybrid p50 2.0 ms / p95 2.8 ms, recall@10 = 1.0 vs
+  exact; space-filtered dense p50 7.3 ms (slower than unfiltered: known cost of the Hilbert MatchAny + exact
+  range filter, to optimize later). Real Qdrant Server and partial-snapshot pull remain unverified.
+- Fixed on the way: consolidation depended on store scroll order; it is now canonically sorted.
+
 ## 7. Risks and mitigations
 
 | Risk | Mitigation |

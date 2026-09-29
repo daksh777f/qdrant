@@ -59,6 +59,10 @@ class CloudStore(Protocol):
 
     def count(self) -> int: ...
 
+    def get(self, ids: list[str]) -> list[dict]:
+        """Fetch ``{id, vector, payload}`` for the given IDs."""
+        ...
+
 
 class LocalCloud:
     """Cloud stand-in backed by an Edge shard; needs no server or Docker."""
@@ -104,8 +108,13 @@ class LocalCloud:
     def count(self) -> int:
         return int(self._shard.count(qe.CountRequest()))
 
-    def get(self, ids: list[str]) -> list:
-        return list(self._shard.retrieve(ids, with_payload=True, with_vector=True))
+    def get(self, ids: list[str]) -> list[dict]:
+        self._link.require()
+        out = []
+        for r in self._shard.retrieve(ids, with_payload=True, with_vector=True):
+            vec = r.vector["dense"] if isinstance(r.vector, dict) else r.vector
+            out.append({"id": str(r.id), "vector": list(vec), "payload": dict(r.payload or {})})
+        return out
 
     def close(self) -> None:
         self._shard.flush()

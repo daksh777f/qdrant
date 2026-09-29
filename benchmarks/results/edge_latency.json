@@ -1,0 +1,25 @@
+{
+  "n": 50000,
+  "dim": 384,
+  "hnsw_indexed_vectors": 100000,
+  "ingest_per_s": 2162.9,
+  "latency_ms": {
+    "dense": {
+      "p50": 2.25,
+      "p95": 3.26,
+      "mean": 2.36
+    },
+    "hybrid_rrf": {
+      "p50": 1.97,
+      "p95": 2.83,
+      "mean": 2.09
+    },
+    "dense_spatial": {
+      "p50": 7.29,
+      "p95": 11.2,
+      "mean": 9.5
+    }
+  },
+  "recall_at_10_vs_exact": 1.0,
+  "note": "synthetic clustered vectors, single process, warm cache, no network"
+}
