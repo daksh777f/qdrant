@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>LOCI Edge Mission Control</title>
+<style>
+:root {
+  --bg: #0b1017; --panel: #121a24; --panel2: #182230; --line: #243247;
+  --text: #e6edf5; --muted: #8fa3ba; --accent: #4cc2ff;
+  --sync: #34d399; --dedupe: #94a3b8; --summ: #fbbf24; --local: #60a5fa; --priv: #c4b5fd;
+  --bad: #f87171; --ok: #34d399;
+}
+:root[data-theme="light"] {
+  --bg: #f3f6fa; --panel: #ffffff; --panel2: #eef2f7; --line: #d5deea;
+  --text: #14202e; --muted: #56697f; --accent: #0a6dc2;
+  --sync: #0f9d6b; --dedupe: #64748b; --summ: #b7791f; --local: #2563eb; --priv: #7c3aed;
+  --bad: #c62828; --ok: #0f9d6b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 14px 20px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
+h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  margin: 0 0 10px; font-weight: 600; }
+.stats { display: flex; flex-wrap: wrap; gap: 20px; margin-left: auto; }
+.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 12px; }
+.tabs { display: flex; gap: 8px; padding: 12px 20px 0; flex-wrap: wrap; }
+.tab { background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  padding: 8px 14px; border-radius: 8px; cursor: pointer; font: inherit; display: flex; gap: 8px; align-items: center; }
+.tab[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); display: inline-block; }
+.dot.on { background: var(--ok); }
+main { display: grid; gap: 14px; padding: 14px 20px 30px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
+.wide { grid-column: span 2; }
+@media (max-width: 800px) { .wide { grid-column: span 1; } }
+button.act, button.net { font: inherit; color: var(--text); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+button.act:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.net { width: 100%; font-size: 15px; font-weight: 600; padding: 12px; margin-bottom: 12px; }
+button.net.on { border-color: var(--ok); color: var(--ok); }
+button.net.off { border-color: var(--bad); color: var(--bad); background: rgba(248,113,113,.08); }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.lanes { display: flex; gap: 8px; margin: 12px 0 6px; flex-wrap: wrap; }
+.chip { background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+.muted { color: var(--muted); }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;
+  letter-spacing: .03em; color: #0b1017; }
+.b-SYNC_NOW { background: var(--sync); } .b-DEDUPE { background: var(--dedupe); }
+.b-SUMMARIZE_SYNC { background: var(--summ); } .b-KEEP_LOCAL { background: var(--local); }
+.b-PRIVATE { background: var(--priv); }
+.b-mirror { background: transparent; border: 1px solid var(--muted); color: var(--muted); }
+.b-local { background: var(--accent); }
+.feed, .list { max-height: 330px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.feed li, .list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.feed li:last-child, .list li:last-child { border: 0; }
+.row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.reason { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.bar { height: 5px; background: var(--panel2); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--summ); }
+.diffgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.diffgrid div { background: var(--panel2); border-radius: 8px; padding: 8px; text-align: center; }
+.diffgrid b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.diffgrid span { font-size: 11px; color: var(--muted); }
+.verdict { font-weight: 700; padding: 3px 10px; border-radius: 6px; font-size: 12px; }
+.verdict.ok { background: rgba(52,211,153,.15); color: var(--ok); }
+.verdict.no { background: rgba(251,191,36,.15); color: var(--summ); }
+.verdict.off { background: rgba(248,113,113,.15); color: var(--bad); }
+form.search { display: flex; gap: 8px; margin-bottom: 10px; }
+input[type=search] { flex: 1; font: inherit; color: var(--text); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--muted); }
+svg { width: 100%; height: auto; display: block; border-radius: 8px; background: var(--panel2); }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel);
+  border: 1px solid var(--accent); padding: 9px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s;
+  pointer-events: none; max-width: 90vw; z-index: 5; }
+#toast.show { opacity: 1; }
+.theme { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LOCI Edge <small>Mission Control &middot; synthetic warehouse demo</small></h1>
+  <div class="stats" aria-live="polite">
+    <div class="stat"><b id="s-cloud">0</b><span>memories in cloud</span></div>
+    <div class="stat"><b id="s-sent">0 B</b><span>sent (raw + summaries)</span></div>
+    <div class="stat"><b id="s-naive">0 B</b><span>naive sync (estimate)</span></div>
+    <div class="stat"><b id="s-saved">0%</b><span>bandwidth saved</span></div>
+  </div>
+  <button class="theme" id="theme" type="button">Light / dark</button>
+</header>
+<div class="tabs" role="tablist" id="tabs"></div>
+<main id="main" hidden>
+  <section class="card wide">
+    <h2>Warehouse map &middot; Hilbert cells shaded by average novelty</h2>
+    <svg id="map" viewBox="0 0 640 640" role="img" aria-label="Warehouse map with observations"></svg>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="card">
+    <h2>Connectivity &amp; controls</h2>
+    <button id="net" class="net" type="button" aria-pressed="true"></button>
+    <div class="btns">
+      <button class="act" data-act="patrol" data-arg="10" type="button">Patrol 10 steps</button>
+      <button class="act" data-act="patrol" data-arg="50" type="button">Patrol 50 steps</button>
+      <button class="act" data-act="spill" type="button">Report oil spill (urgent)</button>
+      <button class="act" data-act="toolbox" type="button">See the red toolbox</button>
+      <button class="act" data-act="private" type="button">Private note</button>
+      <button class="act" data-act="sync" type="button">Sync now</button>
+    </div>
+    <div class="lanes" id="lanes"></div>
+    <div class="muted" id="lastsync"></div>
+    <div class="muted" style="margin-top:6px">Offline is safe: everything is stored, searchable and queued locally, and syncs when the link returns.</div>
+  </section>
+
+  <section class="card">
+    <h2>Decision feed &middot; why each observation stayed or went</h2>
+    <ul class="feed" id="feed"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Sync diff &middot; local vs cloud</h2>
+    <div id="diffhead"></div>
+    <div class="diffgrid" id="diffgrid"></div>
+    <ul class="list" id="difflist"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Search this robot's memory (hybrid, works offline)</h2>
+    <form class="search" id="sform">
+      <input type="search" id="q" placeholder="e.g. oil spill, toolbox, charging" aria-label="Search query" autocomplete="off">
+      <button class="act" type="submit">Search</button>
+    </form>
+    <div class="muted" id="smeta"></div>
+    <ul class="list" id="results"></ul>
+  </section>
+
+  <section class="card">
+    <h2>Fleet activity</h2>
+    <ul class="list" id="events"></ul>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const COLORS = { SYNC_NOW: "--sync", DEDUPE: "--dedupe", SUMMARIZE_SYNC: "--summ", KEEP_LOCAL: "--local" };
+const LABEL = { SYNC_NOW: "SYNC NOW", DEDUPE: "DEDUPE", SUMMARIZE_SYNC: "SUMMARIZE", KEEP_LOCAL: "KEEP LOCAL" };
+let robot = null, robots = [], busy = false;
+
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v; else if (k === "text") el.textContent = v; else el.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) el.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return el;
+}
+function svg(tag, attrs, title) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (title) el.append(Object.assign(document.createElementNS("http://www.w3.org/2000/svg", "title"), { textContent: title }));
+  return el;
+}
+const bytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+const ago = (ms) => { const s = Math.max(0, Math.round((Date.now() - ms) / 1000)); return s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`; };
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600); }
+async function api(path, opts) {
+  const r = await fetch(path, opts && { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts.body || {}) });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+function badge(action, reason) {
+  const priv = action === "KEEP_LOCAL" && /private/.test(reason || "");
+  return h("span", { class: `badge b-${priv ? "PRIVATE" : action}`, text: priv ? "PRIVATE" : LABEL[action] || action });
+}
+
+function renderTabs(state) {
+  const tabs = $("tabs");
+  if (!robot) robot = state.robots[0].name;
+  tabs.replaceChildren(...state.robots.map((r) => {
+    const b = h("button", { class: "tab", role: "tab", "aria-selected": String(r.name === robot), type: "button" },
+      h("span", { class: "dot" + (r.online ? " on" : "") }), r.name,
+      h("span", { class: "muted", text: `${r.local} local · ${r.mirror} mirror` }));
+    b.onclick = () => { robot = r.name; refresh(); };
+    return b;
+  }));
+}
+
+function renderHeader(s) {
+  $("s-cloud").textContent = s.cloud_memories;
+  $("s-sent").textContent = bytes(s.bytes.sent_total);
+  $("s-naive").textContent = bytes(s.bytes.naive_bytes);
+  $("s-saved").textContent = s.bytes.saved_pct == null ? "–" : `${s.bytes.saved_pct}%`;
+}
+
+function renderControls(s) {
+  const r = s.robots.find((x) => x.name === robot);
+  const net = $("net");
+  net.className = "net " + (r.online ? "on" : "off");
+  net.textContent = r.online ? "● ONLINE — click to cut the network" : "○ OFFLINE — click to restore the network";
+  net.setAttribute("aria-pressed", String(r.online));
+  net.onclick = async () => { await api(`/api/robots/${robot}/link`, { body: { up: !r.online } }); toast(r.online ? `${robot}: network cut` : `${robot}: network restored`); refresh(); };
+  const lanes = $("lanes");
+  lanes.replaceChildren(
+    h("span", { class: "chip", text: `queued raw: ${r.outbox.SYNC_NOW || 0}` }),
+    h("span", { class: "chip", text: `queued for summary: ${r.outbox.SUMMARIZE_SYNC || 0}` }),
+    h("span", { class: "chip", text: `digest ${r.digest}` }));
+  const ls = r.last_sync || {};
+  $("lastsync").textContent = ls.ts_ms
+    ? `Last sync ${ago(ls.ts_ms)}: ${ls.link_down ? "offline, nothing lost" : `sent ${ls.sent} raw, ${ls.summarized} summarized, pulled ${ls.pulled}`}`
+    : "No sync yet.";
+  const ev = $("events");
+  ev.replaceChildren(...s.events.map((e) => h("li", {}, h("span", { class: "mono", text: ago(e.ts_ms) + " " }), h("b", { text: e.robot + " " }), e.msg)));
+  if (!s.events.length) ev.append(h("li", { class: "muted", text: "Nothing yet — try a patrol." }));
+}
+
+function renderFeed(decisions) {
+  const feed = $("feed");
+  feed.replaceChildren(...decisions.map((d) => h("li", {},
+    h("div", { class: "row" }, badge(d.action, d.reason), h("b", { text: d.key }), h("span", { class: "mono", text: ago(d.ts_ms) })),
+    h("div", { class: "reason", text: d.reason }),
+    d.best_similarity != null ? h("div", { class: "mono", text: `similarity ${d.best_similarity} · novelty ${d.novelty} · nearest from ${d.neighbor_source}` }) : null,
+    h("div", { class: "bar", title: `novelty ${d.novelty}` }, h("i", { style: `width:${Math.round(d.novelty * 100)}%` })))));
+  if (!decisions.length) feed.append(h("li", { class: "muted", text: "No observations yet — press “Patrol 10 steps”." }));
+}
+
+function renderDiff(d) {
+  const head = $("diffhead");
+  const verdict = !d.cloud_reachable ? ["off", "cloud unreachable (offline)"] : d.converged ? ["ok", "converged with the cloud"] : ["no", "changes pending"];
+  head.replaceChildren(h("span", { class: `verdict ${verdict[0]}`, text: verdict[1] }),
+    h("span", { class: "mono", text: `  local digest ${d.local_digest}` }));
+  const c = d.counts;
+  $("diffgrid").replaceChildren(...[["to push", c.to_push], ["to pull", c.to_pull], ["in sync", c.in_sync],
+    ["held local", c.held_local], ["await summary", c.awaiting_summary], ["reconcile", c.reconcile]]
+    .map(([k, v]) => h("div", {}, h("b", { text: v }), h("span", { text: k }))));
+  const list = $("difflist");
+  const rows = [];
+  d.to_push.slice(0, 6).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-SYNC_NOW", text: "PUSH" }), " ", i.text || i.id)));
+  d.to_pull.slice(0, 4).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-mirror", text: "PULL" }), " ", i.id)));
+  d.held_local.slice(0, 6).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-KEEP_LOCAL", text: "HELD" }), " ", i.text || i.id, h("div", { class: "reason", text: i.why }))));
+  d.reconcile.slice(0, 4).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-SUMMARIZE_SYNC", text: "RECONCILE" }), " ", i.text || i.id)));
+  list.replaceChildren(...rows);
+  if (!rows.length) list.append(h("li", { class: "muted", text: "Nothing to reconcile." }));
+}
+
+function renderMap(m) {
+  const S = 640, cs = S / m.grid, el = $("map");
+  const kids = [];
+  const maxN = Math.max(1, ...m.cells.map((c) => c.count));
+  for (let i = 0; i <= m.grid; i++) {
+    kids.push(svg("line", { x1: i * cs, y1: 0, x2: i * cs, y2: S, stroke: css("--line"), "stroke-width": 0.5 }));
+    kids.push(svg("line", { x1: 0, y1: i * cs, x2: S, y2: i * cs, stroke: css("--line"), "stroke-width": 0.5 }));
+  }
+  m.cells.forEach((c) => kids.push(svg("rect", { x: c.ix * cs, y: c.iy * cs, width: cs, height: cs, fill: css("--summ"),
+    opacity: (0.1 + 0.6 * c.novelty).toFixed(2) },
+    `Hilbert cell #${c.hilbert} · ${c.count} observations · mean novelty ${c.novelty}`)));
+  m.landmarks.forEach((l) => {
+    const x = l.x * S, y = l.y * S;
+    kids.push(svg("path", { d: `M${x} ${y - 9} L${x + 9} ${y} L${x} ${y + 9} L${x - 9} ${y} Z`, fill: "none", stroke: css("--text"), "stroke-width": 1.5 }, l.text));
+    const t = svg("text", { x: x + 12, y: y - 10, fill: css("--muted"), "font-size": 12 }); t.textContent = l.name; kids.push(t);
+  });
+  m.mirror.forEach((p) => kids.push(svg("circle", { cx: p.x * S, cy: p.y * S, r: 7, fill: "none", stroke: css("--accent"), "stroke-width": 2, "stroke-dasharray": "3 2" },
+    `from fleet mirror (${p.device}): ${p.text}`)));
+  m.points.forEach((p) => kids.push(svg("circle", { cx: p.x * S, cy: p.y * S, r: 3.2, fill: css(COLORS[p.action] || "--text"), opacity: 0.85 }, `${p.action} · novelty ${p.novelty}`)));
+  el.replaceChildren(...kids);
+  const leg = $("legend");
+  leg.replaceChildren(...Object.entries(LABEL).map(([k, v]) => h("span", {}, h("i", { style: `background:${css(COLORS[k])}` }), v)),
+    h("span", {}, "◇ landmark"), h("span", {}, "◌ from fleet mirror"), h("span", {}, "shading = mean novelty of the cell"));
+}
+
+async function refresh() {
+  if (busy) return; busy = true;
+  try {
+    const state = await api("/api/state");
+    if (!state.robots.length) return;
+    $("main").hidden = false;
+    renderTabs(state); renderHeader(state); renderControls(state);
+    const dash = await api(`/api/robots/${robot}/dashboard`);
+    renderFeed(dash.decisions); renderDiff(dash.diff); renderMap(dash.map);
+  } catch (e) { toast("Error: " + e.message); } finally { busy = false; }
+}
+
+document.querySelectorAll("button.act[data-act]").forEach((b) => {
+  b.onclick = async () => {
+    const act = b.dataset.act;
+    try {
+      const body = act === "patrol" ? { steps: +b.dataset.arg } : {};
+      const r = await api(`/api/robots/${robot}/${act}`, { body });
+      if (act === "patrol") toast(`${robot}: ${r.steps} steps → ` + Object.entries(r.decisions).map(([k, v]) => `${v} ${LABEL[k]}`).join(", "));
+      else if (act === "sync") toast(r.link_down ? `${robot} is offline: queued safely` : `${robot}: sent ${r.sent}, summarized ${r.summarized}, pulled ${r.pulled}`);
+      else toast(`${robot}: ${LABEL[r.action]} — ${r.reason}`);
+    } catch (e) { toast("Error: " + e.message); }
+    refresh();
+  };
+});
+
+$("sform").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const q = $("q").value.trim(); if (!q) return;
+  try {
+    const r = await api(`/api/robots/${robot}/search?q=${encodeURIComponent(q)}`);
+    $("smeta").textContent = `${r.results.length} results in ${r.latency_ms} ms · ${r.online ? "online" : "OFFLINE — answered entirely from this device"}`;
+    $("results").replaceChildren(...r.results.map((x) => h("li", {},
+      h("div", { class: "row" }, h("span", { class: `badge b-${x.source}`, text: x.source.toUpperCase() }), h("b", { text: x.text || "(summary)" }), h("span", { class: "mono", text: `score ${x.score}` })),
+      h("div", { class: "mono", text: `${x.device_id} · v${x.version} · ${x.sync_state} · #${x.content_hash} · (${(+x.x).toFixed(2)}, ${(+x.y).toFixed(2)})${x.private ? " · private" : ""}` }))));
+    if (!r.results.length) $("results").append(h("li", { class: "muted", text: "No matches." }));
+  } catch (e) { toast("Error: " + e.message); }
+};
+
+$("theme").onclick = () => {
+  const el = document.documentElement;
+  el.dataset.theme = el.dataset.theme === "light" ? "dark" : "light";
+  try { localStorage.setItem("theme", el.dataset.theme); } catch (e) { /* storage may be unavailable */ }
+  refresh();
+};
+try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) { /* ignore */ }
+
+refresh(); setInterval(refresh, 1200);
+</script>
+</body>
+</html>

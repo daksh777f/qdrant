@@ -163,6 +163,16 @@ Schedule rule: UI must show *something real* by Day 6; polish is not left to the
   ~101 KB naive estimate (94.8% saved), robot-b finds robot-a's spill offline, private memory never leaves.
   Suite: 724 passed / 10 skipped on both backends. Not yet done: recall-vs-threshold sweep (P5 hero chart),
   real-server pull, conflict rules (P4).
+- **P3 done** (`loci/edge/ui/`, `sim.py`, `embed.py`): mission-control web UI, run with
+  `pip install -e ".[edge-ui]" && python -m loci.edge.ui` (http://127.0.0.1:8765). Panels: Hilbert-cell warehouse
+  map shaded by mean novelty; per-robot **cut/restore network** button; controls (patrol, urgent spill, moved
+  toolbox, private note, sync); decision feed with reasons and evidence; sync-diff (push / pull / in-sync /
+  held-local / reconcile); hybrid search with source + provenance badges; fleet activity; bytes ledger (sent vs
+  naive estimate, "saved" only shown once something is sent). Driven end to end in headless Chromium (offline ->
+  restore -> converged; robot-b finds robot-a's spill offline in ~1 ms; no console errors; no horizontal scroll at
+  390 px). Screenshot: `docs/assets/edge-mission-control.png`. The text embedder is a hashed bag-of-words stand-in
+  (no model download); swap in a real model for real data. Not yet in the UI: conflict inbox and abstain/escalate
+  route (P4).
 - Fixed on the way: consolidation depended on store scroll order; it is now canonically sorted.
 
 ## 7. Risks and mitigations

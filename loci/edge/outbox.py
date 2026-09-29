@@ -99,6 +99,11 @@ class Outbox:
             )
         self._db.commit()
 
+    def retry_now(self) -> None:
+        """Clear all backoff timers, e.g. when connectivity is restored."""
+        self._db.execute("UPDATE outbox SET next_attempt_ms=0")
+        self._db.commit()
+
     def pending(self) -> int:
         return int(self._db.execute("SELECT COUNT(*) FROM outbox").fetchone()[0])
 

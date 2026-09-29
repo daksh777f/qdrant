@@ -29,6 +29,9 @@ class Decision:
     neighbor_id: str | None = None
     neighbor_source: str | None = None  # "local" or "mirror"
     displacement: float | None = None  # distance to the neighbour's position, if matched
+    x: float | None = None  # where the observation was made (for the map)
+    y: float | None = None
+    z: float | None = None
     thresholds: dict[str, float] = field(default_factory=dict)
     ts_ms: int = 0
 
