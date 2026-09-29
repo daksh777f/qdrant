@@ -58,6 +58,9 @@ class SyncPolicy:
             key=mem.key,
             point_id=own_id,
             thresholds=cfg.as_dict(),
+            x=mem.x,
+            y=mem.y,
+            z=mem.z,
         )
 
         # Nearest known neighbour across local shard + fleet mirror (excluding itself).

@@ -268,6 +268,23 @@ class EdgeMemoryStore:
             if offset is None:
                 return out
 
+    def list_memories(self, *, include_mirror: bool = True, limit: int = 500) -> list[dict]:
+        """Payload-only listing (no vectors) of local and mirrored memories, newest first."""
+        rows: list[dict] = []
+        for source, shard in (("local", self._shard), ("mirror", self._mirror)):
+            if shard is None or (source == "mirror" and not include_mirror):
+                continue
+            offset = None
+            while True:
+                recs, offset = shard.scroll(
+                    qe.ScrollRequest(limit=256, offset=offset, with_payload=True, with_vector=False)
+                )
+                rows.extend({"id": str(r.id), "source": source, **(r.payload or {})} for r in recs)
+                if offset is None:
+                    break
+        rows.sort(key=lambda r: r.get("timestamp_ms", 0), reverse=True)
+        return rows[:limit]
+
     def bump_seen(self, point_id: str, now_ms: int) -> bool:
         """Count another sighting of an existing local memory (no version change)."""
         recs = self._shard.retrieve([point_id], with_payload=True, with_vector=False)
