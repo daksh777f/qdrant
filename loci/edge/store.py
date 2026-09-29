@@ -249,6 +249,36 @@ class EdgeMemoryStore:
             if offset is None:
                 return out
 
+    def states(self) -> dict[str, dict[str, Any]]:
+        """``{id: {version, sync_state, private, seen_count}}`` for local memories."""
+        out: dict[str, dict[str, Any]] = {}
+        offset = None
+        while True:
+            recs, offset = self._shard.scroll(
+                qe.ScrollRequest(limit=256, offset=offset, with_payload=True, with_vector=False)
+            )
+            for r in recs:
+                pl = r.payload or {}
+                out[str(r.id)] = {
+                    "version": int(pl.get("version", 0)),
+                    "sync_state": pl.get("sync_state", "local_only"),
+                    "private": bool(pl.get("private", False)),
+                    "seen_count": int(pl.get("seen_count", 1)),
+                }
+            if offset is None:
+                return out
+
+    def bump_seen(self, point_id: str, now_ms: int) -> bool:
+        """Count another sighting of an existing local memory (no version change)."""
+        recs = self._shard.retrieve([point_id], with_payload=True, with_vector=False)
+        if not recs:
+            return False
+        n = int((recs[0].payload or {}).get("seen_count", 1)) + 1
+        self._shard.update(
+            qe.UpdateOperation.set_payload([point_id], {"seen_count": n, "last_seen_ms": now_ms})
+        )
+        return True
+
     def digest(self) -> str:
         """Order-independent fingerprint of ``id:version`` pairs; equal digests => equal state."""
         h = hashlib.sha256()

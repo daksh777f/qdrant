@@ -155,6 +155,14 @@ Schedule rule: UI must show *something real* by Day 6; polish is not left to the
   50k x 384-d, HNSW built): dense p50 2.3 ms / p95 3.3 ms, hybrid p50 2.0 ms / p95 2.8 ms, recall@10 = 1.0 vs
   exact; space-filtered dense p50 7.3 ms (slower than unfiltered: known cost of the Hilbert MatchAny + exact
   range filter, to optimize later). Real Qdrant Server and partial-snapshot pull remain unverified.
+- **P2 done** (`policy.py`, `decisions.py`, `sync.py`): surprise-driven policy (private / urgent / dedupe /
+  moved / novelty / summarize / keep-local), judged against local shard **and** fleet mirror; every verdict is a
+  persisted `Decision` with evidence and thresholds; summary lane (N observations -> <=2 centroid points);
+  `SyncEngine.diff()` (push / pull / in-sync / reconcile / held-local); netsplit convergence test. Demo
+  `examples/edge_p2_patrol.py` (synthetic, deterministic): 201 observations, 6 raw + 46 summarized, ~5.3 KB vs
+  ~101 KB naive estimate (94.8% saved), robot-b finds robot-a's spill offline, private memory never leaves.
+  Suite: 724 passed / 10 skipped on both backends. Not yet done: recall-vs-threshold sweep (P5 hero chart),
+  real-server pull, conflict rules (P4).
 - Fixed on the way: consolidation depended on store scroll order; it is now canonically sorted.
 
 ## 7. Risks and mitigations
