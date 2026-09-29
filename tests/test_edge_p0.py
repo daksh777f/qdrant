@@ -147,3 +147,86 @@ def test_digest_detects_divergence(rig):
     engine.submit(m.id)
     engine.push()
     assert cloud.versions() == store.versions()
+
+
+# --------------------------------------------------------------------------
+# P1: fleet mirror + delta pull
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fleet(tmp_path):
+    """Two robots sharing one LocalCloud; each with a writable shard + mirror."""
+    link_a, link_b = Link(True), Link(True)
+    cloud_a = LocalCloud(tmp_path / "cloud", DIM, link_a)
+    a = EdgeMemoryStore(tmp_path / "a", DIM, "robot-a", mirror_path=tmp_path / "a-mirror")
+    b = EdgeMemoryStore(tmp_path / "b", DIM, "robot-b", mirror_path=tmp_path / "b-mirror")
+    # Robot B reaches the same cloud shard through its own link.
+    cloud_b = cloud_a
+    cloud_b._link = link_b
+    ea = SyncEngine(a, Outbox(tmp_path / "a.db"), cloud_a)
+    eb = SyncEngine(b, Outbox(tmp_path / "b.db"), cloud_b)
+    yield a, b, ea, eb, link_a, link_b
+    a.close()
+    b.close()
+    cloud_a.close()
+
+
+def test_robot_b_finds_what_robot_a_saw_while_offline(fleet):
+    a, b, ea, eb, _, link_b = fleet
+    m = a.put(_mem("toolbox", 5, text="red toolbox near dock 4"))
+    ea.submit(m.id)
+    assert ea.push().sent == 1
+    assert b.search(vector=_vec(5), limit=1, include_mirror=True) == []  # not pulled yet
+    rep = eb.pull()
+    assert rep.pulled == 1 and rep.bytes_received > 0
+    link_b.set(False)  # B goes offline; the knowledge is already local
+    hit = b.search(vector=_vec(5), text="toolbox", limit=1)[0]
+    assert hit.id == m.id and hit.source == "mirror"
+
+
+def test_pull_is_delta_and_skips_own_points(fleet):
+    a, b, ea, eb, *_ = fleet
+    m1 = a.put(_mem("one", 1))
+    mine = b.put(_mem("mine", 9))
+    ea.submit(m1.id)
+    eb.submit(mine.id)
+    ea.push()
+    eb.push()
+    assert eb.pull().pulled == 1  # A's point only; B's own point is not mirrored
+    assert eb.pull().pulled == 0  # nothing new -> nothing fetched
+    m1 = a.put(_mem("one", 2))  # A updates the memory -> version 2
+    ea.submit(m1.id)
+    ea.push()
+    assert eb.pull().pulled == 1 and b.mirror_versions()[m1.id] == 2
+
+
+def test_pull_offline_changes_nothing(fleet):
+    a, b, ea, eb, _, link_b = fleet
+    ea.submit(a.put(_mem("x", 1)).id)
+    ea.push()
+    link_b.set(False)
+    rep = eb.pull()
+    assert rep.link_down and rep.pulled == 0 and b.mirror_versions() == {}
+
+
+def test_local_copy_wins_over_mirror_on_same_id(tmp_path):
+    s = EdgeMemoryStore(tmp_path / "s", DIM, "robot-a", mirror_path=tmp_path / "m")
+    m = s.put(_mem("obj", 1, text="local wins"))
+    s.mirror_upsert(
+        [{"id": m.id, "vector": _vec(1), "payload": {"text": "stale mirror", "version": 1}}]
+    )
+    hits = s.search(vector=_vec(1), limit=5)
+    assert [h.source for h in hits if h.id == m.id] == ["local"]
+    s.close()
+
+
+def test_hybrid_search_spans_local_and_mirror(fleet):
+    a, b, ea, eb, *_ = fleet
+    ma = a.put(_mem("far", 1, text="blue pallet aisle nine"))
+    ea.submit(ma.id)
+    ea.push()
+    eb.pull()
+    b.put(_mem("near", 2, text="forklift charging station"))
+    top = b.search(vector=_vec(77), text="pallet", limit=2)
+    assert top[0].id == ma.id and {h.source for h in top} == {"mirror", "local"}

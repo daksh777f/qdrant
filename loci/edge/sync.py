@@ -11,6 +11,13 @@ from loci.edge.store import EdgeMemoryStore
 
 
 @dataclass
+class PullReport:
+    pulled: int = 0
+    bytes_received: int = 0
+    link_down: bool = False
+
+
+@dataclass
 class PushReport:
     sent: int = 0
     failed: int = 0
@@ -79,3 +86,25 @@ class SyncEngine:
             self.store.set_sync_state(sent_ids, "synced")
             report.sent += len(sent_ids)
             report.bytes_sent += sum(wire_bytes(p) for p in points)
+
+    def pull(self) -> PullReport:
+        """Delta-pull other devices' memories into the fleet mirror.
+
+        Compares the cloud's ``{id: version}`` map with the mirror's, skips this
+        device's own points (already local), and fetches only what is missing
+        or newer. Offline, it reports ``link_down`` and changes nothing.
+        """
+        report = PullReport()
+        try:
+            remote = self.cloud.versions()
+            have = self.store.mirror_versions()
+            own = set(self.store.versions())
+            want = [i for i, v in remote.items() if i not in own and have.get(i, 0) < v]
+            for start in range(0, len(want), self._batch):
+                points = self.cloud.get(want[start : start + self._batch])
+                self.store.mirror_upsert(points)
+                report.pulled += len(points)
+                report.bytes_received += sum(wire_bytes(p) for p in points)
+        except LinkDown:
+            report.link_down = True
+        return report

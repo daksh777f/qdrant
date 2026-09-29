@@ -50,6 +50,7 @@ class SearchHit:
     id: str
     score: float
     payload: dict[str, Any]
+    source: str = "local"  # "local" (writable shard) or "mirror" (fleet mirror)
 
 
 class EdgeMemoryStore:
@@ -63,38 +64,42 @@ class EdgeMemoryStore:
         *,
         epoch_size_ms: int = 5000,
         resolutions: list[int] | None = None,
+        mirror_path: str | Path | None = None,
     ) -> None:
         self.device_id = device_id
         self.vector_size = vector_size
         self._epoch_size_ms = epoch_size_ms
         self._hilbert = HilbertIndex(resolutions or [4, 8, 12])
         self._bm25 = qe.Bm25(qe.Bm25Config())
-        p = Path(path)
-        p.mkdir(parents=True, exist_ok=True)
-        cfg = qe.EdgeConfig(
+        self._cfg = qe.EdgeConfig(
             vectors={"dense": qe.EdgeVectorParams(size=vector_size, distance=qe.Distance.Cosine)},
             sparse_vectors={"bm25": qe.EdgeSparseVectorParams(modifier=qe.Modifier.Idf)},
         )
-        if any(p.iterdir()):
-            self._shard = qe.EdgeShard.load(str(p))
-        else:
-            self._shard = qe.EdgeShard.create(str(p), cfg)
-            self._create_indexes()
+        self._shard = self._open_shard(Path(path))
+        # The mirror holds other devices' memories pulled from the cloud. Local
+        # writes never touch it; it is rewritten only by :meth:`mirror_upsert`.
+        self._mirror = self._open_shard(Path(mirror_path)) if mirror_path else None
 
     # -- setup ---------------------------------------------------------
 
-    def _create_indexes(self) -> None:
+    def _open_shard(self, path: Path) -> Any:
+        path.mkdir(parents=True, exist_ok=True)
+        if any(path.iterdir()):
+            return qe.EdgeShard.load(str(path))
+        shard = qe.EdgeShard.create(str(path), self._cfg)
+        self._create_indexes(shard)
+        return shard
+
+    def _create_indexes(self, shard: Any) -> None:
         upd = qe.UpdateOperation
         for r in self._hilbert.resolutions:
-            self._shard.update(
-                upd.create_field_index(f"hilbert_r{r}", qe.PayloadSchemaType.Integer)
-            )
+            shard.update(upd.create_field_index(f"hilbert_r{r}", qe.PayloadSchemaType.Integer))
         for f in _INT_FIELDS:
-            self._shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Integer))
+            shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Integer))
         for f in _FLOAT_FIELDS:
-            self._shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Float))
+            shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Float))
         for f in _KEYWORD_FIELDS:
-            self._shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Keyword))
+            shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Keyword))
 
     # -- write ---------------------------------------------------------
 
@@ -146,31 +151,61 @@ class EdgeMemoryStore:
         limit: int = 10,
         bounds: dict[str, float] | None = None,
         time_window_ms: tuple[int, int] | None = None,
+        include_mirror: bool = True,
     ) -> list[SearchHit]:
-        """Dense, BM25, or hybrid (RRF) search with optional space/time filters."""
+        """Dense, BM25, or hybrid (RRF) search over the local shard and the fleet mirror.
+
+        Both shards are queried and merged. Where the same point ID is in both,
+        the local copy wins (local edits override the mirror).
+        """
         if vector is None and not text:
             raise ValueError("search needs a vector, text, or both")
         flt = self._filter(bounds, time_window_ms)
+        shards = [("local", self._shard)]
+        if include_mirror and self._mirror is not None:
+            shards.append(("mirror", self._mirror))
         branches = []
         if vector is not None:
             branches.append(("dense", qe.Query.Nearest(vector, using="dense")))
         if text:
             branches.append(("bm25", qe.Query.Nearest(self._bm25.embed_query(text), using="bm25")))
-        if len(branches) == 1:
-            req = qe.QueryRequest(query=branches[0][1], filter=flt, limit=limit, with_payload=True)
-        else:
-            req = qe.QueryRequest(
-                prefetches=[
-                    qe.Prefetch(query=q, filter=flt, limit=max(limit * 3, 20)) for _, q in branches
-                ],
-                query=qe.Fusion.Rrf(k=_RRF_K),
-                limit=limit,
-                with_payload=True,
-            )
-        return [
-            SearchHit(str(h.id), float(h.score), dict(h.payload or {}))
-            for h in self._shard.query(req)
-        ]
+        # Per branch, merge the shards by raw score (local wins on duplicate IDs),
+        # then fuse the branches with RRF. Fusing per shard first would tie each
+        # shard's top hit regardless of how well it actually matched.
+        per_branch = [self._branch_hits(q, flt, limit, shards) for _, q in branches]
+        if len(per_branch) == 1:
+            return per_branch[0][:limit]
+        return _rrf(per_branch, limit)
+
+    def _branch_hits(self, query: Any, flt: Any, limit: int, shards: list) -> list[SearchHit]:
+        pool = max(limit * 3, 20)
+        merged: dict[str, SearchHit] = {}
+        for source, shard in shards:  # local first, so it wins duplicate IDs
+            req = qe.QueryRequest(query=query, filter=flt, limit=pool, with_payload=True)
+            for h in shard.query(req):
+                merged.setdefault(
+                    str(h.id), SearchHit(str(h.id), float(h.score), dict(h.payload or {}), source)
+                )
+        return sorted(merged.values(), key=lambda h: -h.score)
+
+    # -- fleet mirror ----------------------------------------------------
+
+    def mirror_upsert(self, points: list[dict]) -> None:
+        """Write points pulled from the cloud into the read-only fleet mirror."""
+        if self._mirror is None:
+            raise RuntimeError("store was created without a mirror_path")
+        ops = []
+        for p in points:
+            payload = dict(p["payload"], sync_state="mirror")
+            vectors: dict[str, Any] = {"dense": p["vector"]}
+            if payload.get("text"):
+                vectors["bm25"] = self._bm25.embed_document(payload["text"])
+            ops.append(qe.Point(p["id"], vectors, payload))
+        if ops:
+            self._mirror.update(qe.UpdateOperation.upsert_points(ops))
+
+    def mirror_versions(self) -> dict[str, int]:
+        return self._versions(self._mirror) if self._mirror is not None else {}
 
     def _filter(
         self, bounds: dict[str, float] | None, time_window_ms: tuple[int, int] | None
@@ -191,15 +226,22 @@ class EdgeMemoryStore:
     def get(self, ids: list[str], *, with_vector: bool = False) -> list[Any]:
         return list(self._shard.retrieve(ids, with_payload=True, with_vector=with_vector))
 
-    def count(self) -> int:
-        return int(self._shard.count(qe.CountRequest()))
+    def count(self, *, include_mirror: bool = False) -> int:
+        n = int(self._shard.count(qe.CountRequest()))
+        if include_mirror and self._mirror is not None:
+            n += int(self._mirror.count(qe.CountRequest()))
+        return n
 
     def versions(self) -> dict[str, int]:
-        """``{point_id: version}`` for every stored memory."""
+        """``{point_id: version}`` for every locally written memory (mirror excluded)."""
+        return self._versions(self._shard)
+
+    @staticmethod
+    def _versions(shard: Any) -> dict[str, int]:
         out: dict[str, int] = {}
         offset = None
         while True:
-            recs, offset = self._shard.scroll(
+            recs, offset = shard.scroll(
                 qe.ScrollRequest(limit=256, offset=offset, with_payload=True, with_vector=False)
             )
             for r in recs:
@@ -222,6 +264,28 @@ class EdgeMemoryStore:
             out.append({"id": str(r.id), "vector": list(vec), "payload": dict(r.payload or {})})
         return out
 
+    def optimize(self) -> None:
+        """Run Edge's optimizers (builds HNSW past the indexing threshold)."""
+        self._shard.optimize()
+
+    def indexed_vectors(self) -> int:
+        """Vectors covered by an HNSW index (0 => searches are exact scans)."""
+        return int(self._shard.info().indexed_vectors_count)
+
     def close(self) -> None:
-        self._shard.flush()
-        self._shard.close()
+        for shard in (self._shard, self._mirror):
+            if shard is not None:
+                shard.flush()
+                shard.close()
+
+
+def _rrf(ranked_lists: list[list[SearchHit]], limit: int) -> list[SearchHit]:
+    """Reciprocal-rank fusion over already-ranked hit lists."""
+    fused: dict[str, float] = {}
+    hits: dict[str, SearchHit] = {}
+    for ranked in ranked_lists:
+        for rank, h in enumerate(ranked):
+            fused[h.id] = fused.get(h.id, 0.0) + 1.0 / (_RRF_K + rank + 1)
+            hits.setdefault(h.id, h)
+    top = sorted(fused, key=lambda i: -fused[i])[:limit]
+    return [SearchHit(i, fused[i], hits[i].payload, hits[i].source) for i in top]

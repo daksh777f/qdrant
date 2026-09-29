@@ -361,7 +361,7 @@ def _build_client(
 class TestClientConsolidation:
     def test_exactly_two_collections(self):
         client, _ = _build_client()
-        assert set(client.store._collections) == {"loci_data", "loci_summary"}
+        assert set(client.store.collection_names()) == {"loci_data", "loci_summary"}
 
     def test_raw_epochs_beyond_window_dropped(self):
         client, _ = _build_client()
@@ -548,7 +548,7 @@ class TestClientConsolidation:
             with _now(ts):
                 client.insert(_state(ts, scene="a", vector=_scene_vector("a", e)))
         # raw_window_epochs=1 keeps only the current epoch raw.
-        assert set(client.store._collections) == {"t_loci_data", "t_loci_summary"}
+        assert set(client.store.collection_names()) == {"t_loci_data", "t_loci_summary"}
         assert _raw_epochs(client) == [3]
         assert _summary_points(client, 0)
         assert _summary_points(client, 1)
@@ -591,7 +591,7 @@ class TestBoundedMemory:
         assert inserted == n_epochs * 2 * states_per_scene  # 1600
 
         # Bounded collection set: exactly two collections, ever.
-        assert set(client.store._collections) == {"loci_data", "loci_summary"}
+        assert set(client.store.collection_names()) == {"loci_data", "loci_summary"}
 
         # Raw window: epochs 197-199 survive (cutoff = 199 - 3 = 196).
         assert _raw_epochs(client) == [197, 198, 199]

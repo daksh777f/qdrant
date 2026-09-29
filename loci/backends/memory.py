@@ -55,6 +55,10 @@ class MemoryStore:
     def collection_exists(self, name: str) -> bool:
         return name in self._collections
 
+    def collection_names(self) -> list[str]:
+        """Names of all collections, sorted."""
+        return sorted(self._collections)
+
     def delete_collection(self, name: str) -> None:
         """Remove a collection and all its points."""
         self._collections.pop(name, None)
