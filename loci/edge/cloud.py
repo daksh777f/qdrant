@@ -57,11 +57,47 @@ class CloudStore(Protocol):
         """Return ``{point_id: version}`` for everything the cloud holds."""
         ...
 
+    def index(self) -> dict[str, tuple[int, str]]:
+        """Return ``{point_id: (version, device_id)}`` for everything the cloud holds."""
+        ...
+
     def count(self) -> int: ...
 
     def get(self, ids: list[str]) -> list[dict]:
         """Fetch ``{id, vector, payload}`` for the given IDs."""
         ...
+
+
+class LinkedCloud:
+    """One device's view of a shared cloud: every call goes through *its own* link.
+
+    Lets several simulated devices share one cloud store while each has an
+    independent network state (the demo's per-robot "cut the network" switch).
+    """
+
+    def __init__(self, cloud: CloudStore, link: Link) -> None:
+        self._cloud = cloud
+        self.link = link
+
+    def upsert(self, points: list[dict]) -> int:
+        self.link.require()
+        return self._cloud.upsert(points)
+
+    def versions(self) -> dict[str, int]:
+        self.link.require()
+        return self._cloud.versions()
+
+    def index(self) -> dict[str, tuple[int, str]]:
+        self.link.require()
+        return self._cloud.index()
+
+    def count(self) -> int:
+        self.link.require()
+        return self._cloud.count()
+
+    def get(self, ids: list[str]) -> list[dict]:
+        self.link.require()
+        return self._cloud.get(ids)
 
 
 class LocalCloud:
@@ -92,18 +128,22 @@ class LocalCloud:
         self.bytes_received += received
         return received
 
-    def versions(self) -> dict[str, int]:
+    def index(self) -> dict[str, tuple[int, str]]:
         self._link.require()
-        out: dict[str, int] = {}
+        out: dict[str, tuple[int, str]] = {}
         offset = None
         while True:
             recs, offset = self._shard.scroll(
                 qe.ScrollRequest(limit=256, offset=offset, with_payload=True, with_vector=False)
             )
             for r in recs:
-                out[str(r.id)] = int((r.payload or {}).get("version", 0))
+                pl = r.payload or {}
+                out[str(r.id)] = (int(pl.get("version", 0)), str(pl.get("device_id", "")))
             if offset is None:
                 return out
+
+    def versions(self) -> dict[str, int]:
+        return {i: v for i, (v, _) in self.index().items()}
 
     def count(self) -> int:
         return int(self._shard.count(qe.CountRequest()))

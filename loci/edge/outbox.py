@@ -54,14 +54,28 @@ class Outbox:
         )
         self._db.commit()
 
-    def due(self, now_ms: int | None = None, limit: int = 100) -> list[OutboxRow]:
+    def due(
+        self,
+        now_ms: int | None = None,
+        limit: int = 100,
+        decisions: tuple[str, ...] = ("SYNC_NOW",),
+    ) -> list[OutboxRow]:
+        """Rows ready to send, urgent first. ``decisions`` selects the lane."""
         now = now_ms if now_ms is not None else int(time.time() * 1000)
-        cur = self._db.execute(
-            "SELECT point_id, attempts, next_attempt_ms, decision FROM outbox "
-            "WHERE next_attempt_ms <= ? ORDER BY enqueued_ms LIMIT ?",
-            (now, limit),
-        )
-        return [OutboxRow(*r) for r in cur.fetchall()]
+        rows: list[tuple] = []
+        for decision in decisions:  # one parameterised query per lane
+            cur = self._db.execute(
+                "SELECT point_id, attempts, next_attempt_ms, decision, enqueued_ms FROM outbox "
+                "WHERE next_attempt_ms <= ? AND decision = ? ORDER BY enqueued_ms LIMIT ?",
+                (now, decision, limit),
+            )
+            rows.extend(cur.fetchall())
+        rows.sort(key=lambda r: r[4])
+        return [OutboxRow(*r[:4]) for r in rows[:limit]]
+
+    def count_by_decision(self) -> dict[str, int]:
+        rows = self._db.execute("SELECT decision, COUNT(*) FROM outbox GROUP BY decision")
+        return {d: n for d, n in rows.fetchall()}
 
     def mark_sent(self, point_ids: list[str]) -> None:
         self._db.executemany("DELETE FROM outbox WHERE point_id=?", [(p,) for p in point_ids])
