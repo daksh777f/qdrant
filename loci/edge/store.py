@@ -22,6 +22,8 @@ _INT_FIELDS = ("timestamp_ms",)
 _FLOAT_FIELDS = ("x", "y", "z")
 _KEYWORD_FIELDS = ("sync_state", "device_id")
 _RRF_K = 60
+_HIDDEN_ROLES = ("merged", "previous")
+ROLE_FIELDS = ("entity_id", "role", "merged_into", "entity_devices", "entity_size")
 
 
 @dataclass
@@ -152,6 +154,7 @@ class EdgeMemoryStore:
         bounds: dict[str, float] | None = None,
         time_window_ms: tuple[int, int] | None = None,
         include_mirror: bool = True,
+        current_only: bool = False,
     ) -> list[SearchHit]:
         """Dense, BM25, or hybrid (RRF) search over the local shard and the fleet mirror.
 
@@ -160,7 +163,7 @@ class EdgeMemoryStore:
         """
         if vector is None and not text:
             raise ValueError("search needs a vector, text, or both")
-        flt = self._filter(bounds, time_window_ms)
+        flt = self._filter(bounds, time_window_ms, current_only=current_only)
         shards = [("local", self._shard)]
         if include_mirror and self._mirror is not None:
             shards.append(("mirror", self._mirror))
@@ -204,11 +207,50 @@ class EdgeMemoryStore:
         if ops:
             self._mirror.update(qe.UpdateOperation.upsert_points(ops))
 
+    @property
+    def has_mirror(self) -> bool:
+        return self._mirror is not None
+
+    def mirror_state(self) -> dict[str, tuple[int, int]]:
+        """``{id: (version, role_revision)}`` for mirrored memories."""
+        if self._mirror is None:
+            return {}
+        return {
+            str(r.id): (
+                int((r.payload or {}).get("version", 0)),
+                int((r.payload or {}).get("rrev", 0)),
+            )
+            for r in self._iter(self._mirror)
+        }
+
+    def apply_cloud_roles(self, updates: dict[str, dict]) -> None:
+        """Record the cloud's role verdict (merged / previous / current) on our own points.
+
+        Roles are cloud metadata, not new content, so the device-owned ``version`` is untouched.
+        """
+        for pid, fields in updates.items():
+            self._shard.update(qe.UpdateOperation.set_payload([pid], fields))
+
+    @staticmethod
+    def _iter(shard: Any):
+        offset = None
+        while True:
+            recs, offset = shard.scroll(
+                qe.ScrollRequest(limit=256, offset=offset, with_payload=True, with_vector=False)
+            )
+            yield from recs
+            if offset is None:
+                return
+
     def mirror_versions(self) -> dict[str, int]:
         return self._versions(self._mirror) if self._mirror is not None else {}
 
     def _filter(
-        self, bounds: dict[str, float] | None, time_window_ms: tuple[int, int] | None
+        self,
+        bounds: dict[str, float] | None,
+        time_window_ms: tuple[int, int] | None,
+        *,
+        current_only: bool = False,
     ) -> Any:
         must = []
         if bounds is not None:
@@ -221,7 +263,12 @@ class EdgeMemoryStore:
         if time_window_ms is not None:
             lo, hi = time_window_ms
             must.append(qe.FieldCondition("timestamp_ms", range=qe.RangeFloat(gte=lo, lte=hi)))
-        return qe.Filter(must=must) if must else None
+        must_not = []
+        if current_only:  # hide duplicates and superseded positions ("where is it now?")
+            must_not.append(qe.FieldCondition("role", match=qe.MatchAny(list(_HIDDEN_ROLES))))
+        if not must and not must_not:
+            return None
+        return qe.Filter(must=must or None, must_not=must_not or None)
 
     def get(self, ids: list[str], *, with_vector: bool = False) -> list[Any]:
         return list(self._shard.retrieve(ids, with_payload=True, with_vector=with_vector))
@@ -264,6 +311,7 @@ class EdgeMemoryStore:
                     "sync_state": pl.get("sync_state", "local_only"),
                     "private": bool(pl.get("private", False)),
                     "seen_count": int(pl.get("seen_count", 1)),
+                    "rrev": int(pl.get("rrev", 0)),
                 }
             if offset is None:
                 return out

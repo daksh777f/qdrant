@@ -9,6 +9,8 @@ Order of rules (first match wins), each recorded with its evidence:
 2. ``metadata["urgent"]``              -> SYNC_NOW     (safety-critical jumps the queue)
 3. near-identical *and* same place     -> DEDUPE       (already known; just count the sighting)
 4. near-identical but a new place      -> SYNC_NOW     ("moved": the object changed location)
+4b. look-alike of another device's memory, same place -> SYNC_NOW (identity is ambiguous; the
+                                          cloud holds both sightings and can adjudicate)
 5. calibrated novelty >= sync_novelty  -> SYNC_NOW
 6. novelty >= summarize_novelty        -> SUMMARIZE_SYNC (batched into a summary, not raw)
 7. otherwise                           -> KEEP_LOCAL   (familiar; not worth the bandwidth)
@@ -29,6 +31,7 @@ from loci.retrieval.novelty import NoveltyCalibrator
 class PolicyConfig:
     dedupe_similarity: float = 0.95  # cosine at/above which two observations are "the same thing"
     same_place_radius: float = 0.05  # normalised distance below which two sightings share a place
+    ambiguous_similarity: float = 0.85  # look-alike of another device's memory, same place
     sync_novelty: float = 0.6
     summarize_novelty: float = 0.3
 
@@ -36,6 +39,7 @@ class PolicyConfig:
         return {
             "dedupe_similarity": self.dedupe_similarity,
             "same_place_radius": self.same_place_radius,
+            "ambiguous_similarity": self.ambiguous_similarity,
             "sync_novelty": self.sync_novelty,
             "summarize_novelty": self.summarize_novelty,
         }
@@ -101,6 +105,17 @@ class SyncPolicy:
                     f"moved: seen before (sim {best.score:.2f}) but {base.displacement:.2f} "
                     "away from where it was"
                 )
+        elif (
+            best.source == "mirror"
+            and best.score >= cfg.ambiguous_similarity
+            and base.displacement is not None
+            and base.displacement <= cfg.same_place_radius
+        ):
+            base.action = SYNC_NOW
+            base.reason = (
+                f"might be the same object as another device's sighting (sim {best.score:.2f}, "
+                "same place): only the cloud can adjudicate"
+            )
         elif base.novelty >= cfg.sync_novelty:
             base.action, base.reason = SYNC_NOW, f"novel (novelty {base.novelty:.2f})"
         elif base.novelty >= cfg.summarize_novelty:

@@ -173,6 +173,24 @@ Schedule rule: UI must show *something real* by Day 6; polish is not left to the
   390 px). Screenshot: `docs/assets/edge-mission-control.png`. The text embedder is a hashed bag-of-words stand-in
   (no model download); swap in a real model for real data. Not yet in the UI: conflict inbox and abstain/escalate
   route (P4).
+- **P4 done** (`conflicts.py`, `cloud_ai.py`, `gate.py`, UI panels):
+  * *Conflicts (F6)*: pure `resolve_entity` (order-independent; merged / previous / current) applied by a cloud
+    `Reconciler`; duplicates from different devices in the same place + time window are merged (higher confidence,
+    then newer, wins), moved objects keep both with the newest `current`; look-alikes in the 0.85-0.95 similarity
+    band are **never** auto-merged and go to a human review inbox (approve / keep separate, remembered as
+    operator links). Every change is audited. Verdicts propagate to devices via a role revision (`rrev`); own
+    points keep their content/version. `search(current_only=True)` answers "where is it now?".
+  * *Cloud AI loop (F7)*: `CloudBrain` writes per-area fleet briefings into the cloud as `kind="insight"` memories
+    that the normal pull carries into every robot's mirror (searchable offline). Optional LLM through any
+    OpenAI-compatible endpoint (GROQ_API_KEY / CEREBRAS_API_KEY / GEMINI_API_KEY or LOCI_LLM_*), cloud-side only,
+    memory text passed as quoted data, output capped, deterministic fallback labelled in the UI.
+    **The LLM path is verified only against a local fake OpenAI-compatible server**, not a live provider.
+  * *Gate (F10)*: confidence = 0.5 similarity + 0.3 wording + 0.2 margin(x similarity) - staleness; routes
+    ANSWER_LOCAL / ESCALATE_CLOUD (answer from cloud and cache into the mirror) / LOW_CONFIDENCE_OFFLINE (flagged
+    guess) / ABSTAIN. Threshold 0.5 chosen from a measured sweep (stand-in embedder): 59 relevant queries p5 0.63,
+    60 junk queries max 0.34, 0% junk answered for any threshold 0.4-0.6. Re-measure when swapping embedders.
+  * *Policy*: a same-place look-alike of another device's mirrored memory is synced so the cloud can adjudicate.
+  * Suite: 765 passed / 10 skipped on both backends. Screenshot: `docs/assets/edge-conflicts-and-gate.png`.
 - Fixed on the way: consolidation depended on store scroll order; it is now canonically sorted.
 
 ## 7. Risks and mitigations

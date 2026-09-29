@@ -57,8 +57,13 @@ class CloudStore(Protocol):
         """Return ``{point_id: version}`` for everything the cloud holds."""
         ...
 
-    def index(self) -> dict[str, tuple[int, str]]:
-        """Return ``{point_id: (version, device_id)}`` for everything the cloud holds."""
+    def index(self) -> dict[str, tuple[int, str, int]]:
+        """Return ``{point_id: (version, device_id, role_revision)}`` for everything held.
+
+        ``role_revision`` counts changes to the cloud's role verdict on a point
+        (merged / previous / current), so devices can tell their copy is stale even
+        when the device-owned ``version`` is unchanged. Ordinary first writes leave it 0.
+        """
         ...
 
     def count(self) -> int: ...
@@ -87,9 +92,13 @@ class LinkedCloud:
         self.link.require()
         return self._cloud.versions()
 
-    def index(self) -> dict[str, tuple[int, str]]:
+    def index(self) -> dict[str, tuple[int, str, int]]:
         self.link.require()
         return self._cloud.index()
+
+    def search(self, vector: list[float], limit: int = 8, *, current_only: bool = False):
+        self.link.require()
+        return self._cloud.search(vector, limit, current_only=current_only)
 
     def count(self) -> int:
         self.link.require()
@@ -117,33 +126,119 @@ class LocalCloud:
         self.bytes_received = 0
 
     def upsert(self, points: list[dict]) -> int:
+        """Store points; a re-push of an already-held version is a no-op (idempotent).
+
+        A newer version of a point that already carried a role verdict drops that
+        verdict (the reconciler will re-judge it) and bumps ``rrev`` so devices notice.
+        """
         self._link.require()
-        ops = [
-            qe.Point(p["id"], {"dense": p["vector"]}, dict(p["payload"], sync_state="synced"))
-            for p in points
-        ]
+        existing = {
+            str(r.id): r.payload or {}
+            for r in self._shard.retrieve(
+                [p["id"] for p in points], with_payload=True, with_vector=False
+            )
+        }
+        ops = []
+        received = 0
+        for p in points:
+            old = existing.get(p["id"])
+            if old is not None and int(old.get("version", 0)) >= int(
+                p["payload"].get("version", 0)
+            ):
+                continue  # already have this (or a newer) version
+            old_rrev = int(old.get("rrev", 0)) if old is not None else 0
+            rrev = old_rrev + 1 if old is not None and old.get("role") else old_rrev
+            ops.append(
+                qe.Point(
+                    p["id"],
+                    {"dense": p["vector"]},
+                    dict(p["payload"], sync_state="synced", rrev=rrev),
+                )
+            )
+            received += wire_bytes(p)
         if ops:
             self._shard.update(qe.UpdateOperation.upsert_points(ops))
-        received = sum(wire_bytes(p) for p in points)
         self.bytes_received += received
         return received
 
-    def index(self) -> dict[str, tuple[int, str]]:
+    def index(self) -> dict[str, tuple[int, str, int]]:
         self._link.require()
-        out: dict[str, tuple[int, str]] = {}
+        out: dict[str, tuple[int, str, int]] = {}
+        for rec in self._scan_payloads():
+            pl = rec.payload or {}
+            out[str(rec.id)] = (
+                int(pl.get("version", 0)),
+                str(pl.get("device_id", "")),
+                int(pl.get("rrev", 0)),
+            )
+        return out
+
+    def _scan_payloads(self, *, with_vector: bool = False):
         offset = None
         while True:
             recs, offset = self._shard.scroll(
-                qe.ScrollRequest(limit=256, offset=offset, with_payload=True, with_vector=False)
+                qe.ScrollRequest(
+                    limit=256, offset=offset, with_payload=True, with_vector=with_vector
+                )
             )
-            for r in recs:
-                pl = r.payload or {}
-                out[str(r.id)] = (int(pl.get("version", 0)), str(pl.get("device_id", "")))
+            yield from recs
             if offset is None:
-                return out
+                return
+
+    def scan(self) -> list[dict]:
+        """Every point as ``{id, vector, payload}`` (used by the reconciler)."""
+        self._link.require()
+        out = []
+        for r in self._scan_payloads(with_vector=True):
+            vec = r.vector["dense"] if isinstance(r.vector, dict) else r.vector
+            out.append({"id": str(r.id), "vector": list(vec), "payload": dict(r.payload or {})})
+        return out
+
+    def search(self, vector: list[float], limit: int = 8, *, current_only: bool = False):
+        """Dense nearest-neighbour search over the cloud copy (cosine)."""
+        self._link.require()
+        flt = None
+        if current_only:
+            flt = qe.Filter(
+                must_not=[qe.FieldCondition("role", match=qe.MatchAny(["merged", "previous"]))]
+            )
+        req = qe.QueryRequest(
+            query=qe.Query.Nearest(list(vector), using="dense"),
+            filter=flt,
+            limit=limit,
+            with_payload=True,
+            with_vector=True,
+        )
+        out = []
+        for h in self._shard.query(req):
+            vec = h.vector["dense"] if isinstance(h.vector, dict) else h.vector
+            out.append(
+                {
+                    "id": str(h.id),
+                    "score": float(h.score),
+                    "vector": list(vec),
+                    "payload": dict(h.payload or {}),
+                }
+            )
+        return out
+
+    def apply_roles(self, updates: dict[str, dict]) -> int:
+        """Write reconciler output (role fields) and bump each point's role revision."""
+        current = {
+            str(r.id): r.payload or {}
+            for r in self._shard.retrieve(list(updates), with_payload=True, with_vector=False)
+        }
+        n = 0
+        for pid, fields in updates.items():
+            if pid not in current:
+                continue
+            rrev = int(current[pid].get("rrev", 0)) + 1
+            self._shard.update(qe.UpdateOperation.set_payload([pid], {**fields, "rrev": rrev}))
+            n += 1
+        return n
 
     def versions(self) -> dict[str, int]:
-        return {i: v for i, (v, _) in self.index().items()}
+        return {i: v[0] for i, v in self.index().items()}
 
     def count(self) -> int:
         return int(self._shard.count(qe.CountRequest()))

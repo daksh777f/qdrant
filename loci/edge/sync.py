@@ -17,7 +17,7 @@ from loci.edge.decisions import (
 from loci.edge.ids import content_hash, memory_id
 from loci.edge.outbox import Outbox
 from loci.edge.policy import SyncPolicy
-from loci.edge.store import EdgeMemoryStore, Memory
+from loci.edge.store import ROLE_FIELDS, EdgeMemoryStore, Memory
 from loci.schema import WorldState
 from loci.temporal.consolidation import ConsolidationPolicy, consolidate_states
 
@@ -25,6 +25,7 @@ from loci.temporal.consolidation import ConsolidationPolicy, consolidate_states
 @dataclass
 class PullReport:
     pulled: int = 0
+    roles_updated: int = 0  # cloud verdicts (merged / previous / current) applied to our own points
     bytes_received: int = 0
     link_down: bool = False
 
@@ -55,13 +56,16 @@ class SyncDiff:
     to_pull: list[str] = field(default_factory=list)
     in_sync: list[str] = field(default_factory=list)
     reconcile: list[str] = field(default_factory=list)  # cloud copy is newer than ours
+    role_updates: list[str] = field(default_factory=list)  # cloud verdicts we have not applied
     held_local: dict[str, str] = field(default_factory=dict)  # id -> why it stays here
     awaiting_summary: list[str] = field(default_factory=list)
     local_digest: str = ""
 
     @property
     def converged(self) -> bool:
-        return self.cloud_reachable and not (self.to_push or self.to_pull or self.reconcile)
+        return self.cloud_reachable and not (
+            self.to_push or self.to_pull or self.reconcile or self.role_updates
+        )
 
 
 class SyncEngine:
@@ -233,22 +237,41 @@ class SyncEngine:
     # -- pull ---------------------------------------------------------------
 
     def pull(self) -> PullReport:
-        """Delta-pull other devices' memories into the fleet mirror.
+        """Delta-pull the cloud's changes.
 
-        Skips this device's own points (and summaries), and fetches only what is
-        missing or newer. Offline, it reports ``link_down`` and changes nothing.
+        * Other devices' memories (and cloud insights) go into the fleet mirror when
+          missing or when the role revision is newer.
+        * For our own points, only the cloud's role verdict (merged / previous /
+          current) is applied; our content and version are never overwritten.
+
+        Offline, it reports ``link_down`` and changes nothing.
         """
         report = PullReport()
         try:
             remote = self.cloud.index()
-            have = self.store.mirror_versions()
+            have = self.store.mirror_state()
+            mine = self.store.states()
             me = self.store.device_id
-            want = [i for i, (v, dev) in remote.items() if dev != me and have.get(i, 0) < v]
+            want, role_ids = [], []
+            for pid, (ver, dev, rrev) in remote.items():
+                if dev == me:
+                    if pid in mine and rrev > mine[pid]["rrev"]:
+                        role_ids.append(pid)
+                elif have.get(pid, (0, 0)) < (ver, rrev):
+                    want.append(pid)
             for start in range(0, len(want), self._batch):
                 points = self.cloud.get(want[start : start + self._batch])
                 self.store.mirror_upsert(points)
                 report.pulled += len(points)
                 report.bytes_received += sum(wire_bytes(p) for p in points)
+            if role_ids:
+                updates = {}
+                for p in self.cloud.get(role_ids):
+                    fields = {k: p["payload"].get(k) for k in ROLE_FIELDS}  # None clears a verdict
+                    fields["rrev"] = p["payload"].get("rrev", 0)
+                    updates[p["id"]] = fields
+                self.store.apply_cloud_roles(updates)
+                report.roles_updated = len(updates)
         except LinkDown:
             report.link_down = True
         return report
@@ -274,7 +297,7 @@ class SyncEngine:
             elif st["sync_state"] == "queued_summary":
                 out.awaiting_summary.append(pid)
             elif remote is not None:
-                rv = remote.get(pid, (0, ""))[0]
+                rv = remote.get(pid, (0, "", 0))[0]
                 if rv < st["version"]:
                     out.to_push.append(pid)
                 elif rv == st["version"]:
@@ -284,7 +307,11 @@ class SyncEngine:
             else:
                 out.to_push.append(pid)  # cannot verify offline: still pending
         if remote is not None:
-            have = self.store.mirror_versions()
+            have = self.store.mirror_state()
             me = self.store.device_id
-            out.to_pull = [i for i, (v, dev) in remote.items() if dev != me and have.get(i, 0) < v]
+            for pid, (ver, dev, rrev) in remote.items():
+                if dev != me and have.get(pid, (0, 0)) < (ver, rrev):
+                    out.to_pull.append(pid)
+                elif dev == me and pid in states and rrev > states[pid]["rrev"]:
+                    out.role_updates.append(pid)
         return out

@@ -18,8 +18,11 @@ from typing import Any
 import numpy as np
 
 from loci.edge.cloud import Link, LinkedCloud, LocalCloud
+from loci.edge.cloud_ai import CloudBrain, LLMClient
+from loci.edge.conflicts import ConflictLog, Reconciler
 from loci.edge.decisions import DecisionLog
 from loci.edge.embed import HashEmbedder
+from loci.edge.gate import AnswerGate
 from loci.edge.outbox import Outbox
 from loci.edge.store import EdgeMemoryStore, Memory
 from loci.edge.sync import SummaryReport, SyncEngine
@@ -47,6 +50,7 @@ class Node:
     outbox: Outbox
     log: DecisionLog
     engine: SyncEngine
+    gate: AnswerGate | None = None
     step: int = 0
     last_sync: dict[str, Any] = field(default_factory=dict)
 
@@ -65,6 +69,12 @@ class Fleet:
         self.rng = np.random.default_rng(seed)
         self.lock = threading.RLock()
         self.cloud = LocalCloud(self.dir / "cloud", dim)
+        # Cloud-side processes: conflict reconciler and the fleet-briefing brain.
+        self.conflicts = ConflictLog(self.dir / "conflicts.db")
+        self.reconciler = Reconciler(self.cloud, self.conflicts)
+        self.llm = LLMClient.from_env()
+        self.brain = CloudBrain(self.cloud, self.embedder, self.llm)
+        self.cloud_last: dict[str, Any] = {}
         self.events: deque[dict] = deque(maxlen=200)
         self.ledger = {"observations": 0, "naive_bytes": 0, "sent_bytes": 0, "summary_bytes": 0}
         self.nodes: dict[str, Node] = {}
@@ -77,8 +87,10 @@ class Fleet:
             )
             outbox = Outbox(self.dir / f"{name}-outbox.db")
             log = DecisionLog(self.dir / f"{name}-decisions.db")
-            engine = SyncEngine(store, outbox, LinkedCloud(self.cloud, link), log=log)
-            self.nodes[name] = Node(name, link, store, outbox, log, engine)
+            linked = LinkedCloud(self.cloud, link)
+            engine = SyncEngine(store, outbox, linked, log=log)
+            gate = AnswerGate(store, self.embedder, linked)
+            self.nodes[name] = Node(name, link, store, outbox, log, engine, gate)
         self._auto = False
         self._thread: threading.Thread | None = None
 
@@ -94,9 +106,24 @@ class Fleet:
             {"ts_ms": int(time.time() * 1000), "robot": robot, "kind": kind, "msg": msg}
         )
 
-    def _observe(self, n: Node, key: str, text: str, x: float, y: float, **kw: Any):
-        noise = 0.03 * self.rng.normal(size=self.dim)
-        vec = self.embedder.embed(text) + noise
+    def _observe(
+        self,
+        n: Node,
+        key: str,
+        text: str,
+        x: float,
+        y: float,
+        *,
+        tilt: float | None = None,
+        **kw: Any,
+    ):
+        base = self.embedder.embed(text)
+        if tilt is not None:  # a blurry view: only ``tilt`` cosine similar to the clean one
+            u = self.rng.normal(size=self.dim)
+            u -= (u @ base) * base
+            u /= np.linalg.norm(u)
+            base = tilt * base + np.sqrt(1 - tilt**2) * u
+        vec = base + 0.01 * self.rng.normal(size=self.dim)
         vec /= np.linalg.norm(vec)
         mem = Memory(
             key=key,
@@ -172,6 +199,43 @@ class Fleet:
             self._event(name, "observe", f"saw the red toolbox at ({x:.2f}, {y:.2f})")
             return d.to_dict()
 
+    def both_see_toolbox(self) -> dict:
+        """Both robots independently report the toolbox at (almost) the same spot."""
+        with self.lock:
+            spot = TOOLBOX_SPOTS[(self._toolbox + 1) % len(TOOLBOX_SPOTS)]
+            out = {}
+            for i, (name, n) in enumerate(self.nodes.items()):
+                d = self._observe(
+                    n,
+                    f"{name}-toolbox-{time.time_ns()}",
+                    "red toolbox",
+                    spot[0] + 0.004 * i,
+                    spot[1],
+                    confidence=0.7 + 0.2 * i,
+                )
+                out[name] = d.to_dict()
+                self._event(
+                    name, "observe", f"saw the red toolbox at ({spot[0]:.2f}, {spot[1]:.2f})"
+                )
+            return out
+
+    def blurry_toolbox(self, name: str) -> dict:
+        """A poor view of the toolbox: similar, but not similar enough to merge automatically."""
+        with self.lock:
+            n = self.node(name)
+            x, y = TOOLBOX_SPOTS[max(self._toolbox, 0)]
+            d = self._observe(
+                n,
+                f"{name}-blurry-{time.time_ns()}",
+                "red toolbox",
+                x + 0.004,
+                y,
+                tilt=0.90,
+                confidence=0.5,
+            )
+            self._event(name, "observe", "got a blurry view of the red toolbox")
+            return d.to_dict()
+
     def private_note(self, name: str) -> dict:
         with self.lock:
             n = self.node(name)
@@ -195,6 +259,8 @@ class Fleet:
         with self.lock:
             n = self.node(name)
             push = n.engine.push()
+            if not push.link_down:
+                self._cloud_cycle()
             queued = n.outbox.count_by_decision().get("SUMMARIZE_SYNC", 0)
             if flush_summaries or queued >= SUMMARY_BATCH:
                 summ = n.engine.summarize_pending()
@@ -220,6 +286,44 @@ class Fleet:
                     "sync",
                     f"sent {push.sent} raw + {summ.covered} summarized, pulled {pull.pulled}",
                 )
+            return res
+
+    def _cloud_cycle(self) -> None:
+        """What the cloud does after data arrives: reconcile conflicts, then brief the fleet."""
+        rec = self.reconciler.run()
+        brief = self.brain.publish()
+        if rec.ran and (rec.merged or rec.moved or rec.reviews_opened):
+            self._event(
+                "cloud",
+                "reconcile",
+                f"reconciled: {rec.merged} merged, {rec.moved} moved, "
+                f"{rec.reviews_opened} need review",
+            )
+        if brief.insights:
+            self._event(
+                "cloud",
+                "insight",
+                f"published {brief.insights} fleet briefing(s) [{brief.generator}]",
+            )
+        self.cloud_last = {
+            "reconcile": {"merged": rec.merged, "moved": rec.moved, "reviews": rec.reviews_opened},
+            "briefing": {
+                "insights": brief.insights,
+                "generator": brief.generator,
+                "llm_errors": brief.llm_errors,
+            },
+        }
+
+    def resolve_conflict(self, conflict_id: int, approve: bool) -> dict | None:
+        with self.lock:
+            res = self.conflicts.resolve(conflict_id, approve)
+            if res is not None:
+                self._event(
+                    "cloud",
+                    "review",
+                    f"operator {'approved' if approve else 'rejected'} match #{conflict_id}",
+                )
+                self._cloud_cycle()
             return res
 
     def auto_tick(self) -> None:
@@ -327,17 +431,35 @@ class Fleet:
         with self.lock:
             rows = self.node(name).store.list_memories(limit=limit)
             keep = (
-                "id", "source", "text", "x", "y", "timestamp_ms", "device_id", "confidence",
-                "private", "version", "content_hash", "sync_state", "seen_count", "summary",
+                "id",
+                "source",
+                "text",
+                "x",
+                "y",
+                "timestamp_ms",
+                "device_id",
+                "confidence",
+                "private",
+                "version",
+                "content_hash",
+                "sync_state",
+                "seen_count",
+                "summary",
                 "source_count",
-            )  # fmt: skip
+                "role",
+                "kind",
+                "generator",
+                "entity_id",
+            )
             return [{k: r[k] for k in keep if k in r} for r in rows]
 
-    def search(self, name: str, text: str, limit: int = 8) -> dict:
+    def search(self, name: str, text: str, limit: int = 8, *, current_only: bool = False) -> dict:
         with self.lock:
             n = self.node(name)
             t = time.perf_counter()
-            hits = n.store.search(vector=self.embedder(text), text=text, limit=limit)
+            hits = n.store.search(
+                vector=self.embedder(text), text=text, limit=limit, current_only=current_only
+            )
             ms = (time.perf_counter() - t) * 1000
             return {
                 "query": text,
@@ -351,14 +473,68 @@ class Fleet:
                         **{
                             k: h.payload.get(k)
                             for k in (
-                                "text", "x", "y", "device_id", "version", "sync_state",
-                                "content_hash", "timestamp_ms", "private", "seen_count",
+                                "text",
+                                "x",
+                                "y",
+                                "device_id",
+                                "version",
+                                "sync_state",
+                                "content_hash",
+                                "timestamp_ms",
+                                "private",
+                                "seen_count",
+                                "role",
+                                "kind",
+                                "generator",
                             )
                         },
                     }
                     for h in hits
                 ],
-            }  # fmt: skip
+            }
+
+    def ask(self, name: str, text: str, *, history: bool = False) -> dict:
+        """Gated question answering: local, escalate to cloud, low-confidence, or abstain."""
+        with self.lock:
+            n = self.node(name)
+            ans = n.gate.ask(text, current_only=not history)
+            d = ans.to_dict()
+            d["online"] = n.link.up
+            if d["route"] == "ESCALATE_CLOUD":
+                self._event(
+                    name,
+                    "escalate",
+                    f"asked the cloud about '{text}' and cached {ans.cached} hit(s)",
+                )
+            return d
+
+    def cloud_view(self) -> dict:
+        with self.lock:
+            pts = self.cloud.scan()
+            insights = [
+                {
+                    k: p["payload"].get(k)
+                    for k in ("text", "generator", "x", "y", "version", "timestamp_ms")
+                }
+                for p in pts
+                if p["payload"].get("kind") == "insight"
+            ]
+            roles: dict[str, int] = {}
+            for p in pts:
+                r = p["payload"].get("role") or "single"
+                roles[r] = roles.get(r, 0) + 1
+            return {
+                "conflicts": self.conflicts.list(limit=40),
+                "conflict_counts": self.conflicts.counts(),
+                "insights": insights,
+                "roles": roles,
+                "llm": (
+                    {"enabled": True, "provider": self.llm.provider, "model": self.llm.model}
+                    if self.llm
+                    else {"enabled": False, "provider": None, "model": None}
+                ),
+                "last": self.cloud_last,
+            }
 
     def _cell_hilbert(self) -> dict[tuple[int, int], int]:
         if self._cells is None:
@@ -393,7 +569,10 @@ class Fleet:
                 "grid": GRID,
                 "cells": [
                     {
-                        "ix": ix, "iy": iy, "hilbert": hil[(ix, iy)], "count": c["n"],
+                        "ix": ix,
+                        "iy": iy,
+                        "hilbert": hil[(ix, iy)],
+                        "count": c["n"],
                         "novelty": round(c["novelty"] / c["n"], 3),
                     }
                     for (ix, iy), c in cells.items()
@@ -403,7 +582,7 @@ class Fleet:
                 "landmarks": [
                     {"name": nm, "text": t, "x": x, "y": y} for nm, t, (x, y) in LANDMARKS
                 ],
-            }  # fmt: skip
+            }
 
     def close(self) -> None:
         self.stop_auto()
@@ -412,6 +591,7 @@ class Fleet:
                 n.store.close()
                 n.outbox.close()
                 n.log.close()
+            self.conflicts.close()
             self.cloud.close()
         if self._tmp is not None:
             self._tmp.cleanup()

@@ -18,6 +18,10 @@ class LinkBody(BaseModel):
     up: bool
 
 
+class ResolveBody(BaseModel):
+    approve: bool
+
+
 class PatrolBody(BaseModel):
     steps: int = 10
 
@@ -73,6 +77,33 @@ def create_app(fleet: Fleet | None = None, *, autosync: bool = True) -> FastAPI:
     def toolbox(name: str) -> dict:
         return fleet.move_toolbox(robot(name))
 
+    @app.post("/api/robots/{name}/blurry")
+    def blurry(name: str) -> dict:
+        return fleet.blurry_toolbox(robot(name))
+
+    @app.post("/api/scenario/both-toolbox")
+    def both_toolbox() -> dict:
+        return fleet.both_see_toolbox()
+
+    @app.get("/api/cloud")
+    def cloud() -> dict:
+        return fleet.cloud_view()
+
+    @app.post("/api/conflicts/{conflict_id}/resolve")
+    def resolve(conflict_id: int, body: ResolveBody) -> dict:
+        res = fleet.resolve_conflict(conflict_id, body.approve)
+        if res is None:
+            raise HTTPException(404, "no such pending review")
+        return res
+
+    @app.get("/api/robots/{name}/ask")
+    def ask(
+        name: str,
+        q: str = Query(..., min_length=1, max_length=200),
+        history: bool = False,
+    ) -> dict:
+        return fleet.ask(robot(name), q, history=history)
+
     @app.post("/api/robots/{name}/private")
     def private(name: str) -> dict:
         return fleet.private_note(robot(name))
@@ -95,7 +126,12 @@ def create_app(fleet: Fleet | None = None, *, autosync: bool = True) -> FastAPI:
         return fleet.memories(robot(name), limit)
 
     @app.get("/api/robots/{name}/search")
-    def search(name: str, q: str = Query(..., min_length=1), limit: int = Query(8, ge=1, le=50)):
-        return fleet.search(robot(name), q, limit)
+    def search(
+        name: str,
+        q: str = Query(..., min_length=1, max_length=200),
+        limit: int = Query(8, ge=1, le=50),
+        current_only: bool = False,
+    ):
+        return fleet.search(robot(name), q, limit, current_only=current_only)
 
     return app

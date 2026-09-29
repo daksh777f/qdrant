@@ -108,3 +108,78 @@ def test_dashboard_map_and_decisions_shapes(client):
 def test_search_validation(client):
     assert client.get("/api/robots/robot-a/search").status_code == 422
     assert client.get("/api/robots/robot-a/search", params={"q": ""}).status_code == 422
+
+
+# --------------------------------------------------------------------------- P4
+
+
+def _cut_both(c, up):
+    for r in ("robot-a", "robot-b"):
+        post(c, f"/api/robots/{r}/link", up=up)
+
+
+def _sync_both_twice(c):
+    for _ in range(2):
+        for r in ("robot-a", "robot-b"):
+            post(c, f"/api/robots/{r}/sync")
+
+
+def test_both_robots_see_toolbox_offline_then_cloud_merges_duplicates(client):
+    _cut_both(client, False)
+    out = post(client, "/api/scenario/both-toolbox")
+    assert {v["action"] for v in out.values()} == {"SYNC_NOW"}  # neither knew about the other
+    _cut_both(client, True)
+    _sync_both_twice(client)
+    cloud = client.get("/api/cloud").json()
+    merged = [x for x in cloud["conflicts"] if x["rule"] == "merge_duplicate"]
+    assert len(merged) == 1 and merged[0]["status"] == "auto"
+    assert cloud["roles"].get("merged") == 1 and cloud["roles"].get("current") == 1
+    assert cloud["insights"] and cloud["llm"]["enabled"] is False
+    assert all(i["generator"] == "deterministic" for i in cloud["insights"])
+
+
+def test_moved_toolbox_where_is_it_now_answers_with_newest_only(client):
+    post(client, "/api/robots/robot-a/toolbox")
+    post(client, "/api/robots/robot-b/toolbox")  # second spot: moved
+    _sync_both_twice(client)
+    assert any(x["rule"] == "moved" for x in client.get("/api/cloud").json()["conflicts"])
+    now = client.get("/api/robots/robot-a/ask", params={"q": "red toolbox"}).json()
+    toolboxes = [h for h in now["hits"] if h["text"] == "red toolbox"]
+    assert len(toolboxes) == 1 and toolboxes[0]["role"] in {"current", None}
+    hist = client.get(
+        "/api/robots/robot-a/ask", params={"q": "red toolbox", "history": "true"}
+    ).json()
+    assert len([h for h in hist["hits"] if h["text"] == "red toolbox"]) == 2
+
+
+def test_blurry_view_goes_to_inbox_and_operator_can_approve(client):
+    post(client, "/api/robots/robot-a/toolbox")
+    post(client, "/api/robots/robot-b/blurry")
+    _sync_both_twice(client)
+    cloud = client.get("/api/cloud").json()
+    pending = [x for x in cloud["conflicts"] if x["status"] == "pending_review"]
+    assert len(pending) == 1 and 0.85 <= pending[0]["evidence"]["similarity"] < 0.95
+    assert "merged" not in cloud["roles"]  # never auto-merged
+    r = post(client, f"/api/conflicts/{pending[0]['id']}/resolve", approve=True)
+    assert r["status"] == "approved"
+    assert client.get("/api/cloud").json()["roles"].get("merged") == 1
+    bad = client.post(f"/api/conflicts/{pending[0]['id']}/resolve", json={"approve": True})
+    assert bad.status_code == 404  # already decided
+
+
+def test_ask_routes_local_escalate_and_abstain(client):
+    post(client, "/api/robots/robot-a/spill")
+    post(client, "/api/robots/robot-a/sync")
+    esc = client.get("/api/robots/robot-b/ask", params={"q": "oil spill"}).json()
+    assert esc["route"] == "ESCALATE_CLOUD" and esc["cached"] >= 1
+    post(client, "/api/robots/robot-b/link", up=False)
+    loc = client.get("/api/robots/robot-b/ask", params={"q": "oil spill"}).json()
+    assert loc["route"] == "ANSWER_LOCAL" and loc["online"] is False
+    junk = client.get("/api/robots/robot-b/ask", params={"q": "banana submarine"}).json()
+    assert junk["route"] == "ABSTAIN" and junk["hits"] == []
+
+
+def test_ask_validation(client):
+    assert client.get("/api/robots/robot-a/ask").status_code == 422
+    assert client.get("/api/robots/robot-a/ask", params={"q": "x" * 500}).status_code == 422
+    assert client.get("/api/robots/nope/ask", params={"q": "x"}).status_code == 404
