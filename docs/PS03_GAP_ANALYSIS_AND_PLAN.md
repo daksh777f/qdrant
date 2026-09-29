@@ -97,17 +97,38 @@ as the second act** ("and when two robots disagree, geometry resolves it").
 - F6 Space-time conflict engine, two rules only: (a) near-duplicate vector + same Hilbert cell + time window
   from different devices = merge (higher confidence wins, sightings unioned); (b) same object in a different
   cell = "moved": keep both, newest wins for "where is it now?". Every resolution written to an audit log.
-- F7 Cloud AI loop: cloud consolidation across devices (+ optional LLM summary, deterministic fallback when no
-  API key), pushed down as read-only summaries into mirrors.
-- F8 Mission-control web UI (4 panels): Hilbert-cell map with novelty heatmap; outbox/sync status with
-  **Cut network** button and bytes counter; decision explainer; conflict inbox. Plus memory browser and search box.
-- F9 One benchmark: p50/p95 offline hybrid-search latency, bytes synced vs. naive sync, recall@10 retained.
+- F7 Cloud AI loop: cloud consolidation across devices plus an LLM step (free-tier Groq / Cerebras / Gemini via
+  their OpenAI-compatible endpoints, key from an env var, never committed, no paid services) used for
+  (a) fleet summaries pushed down into mirrors and (b) answering `ESCALATE_CLOUD` queries. The LLM runs only on
+  the cloud side, so the edge stays fully offline-capable; `private` memories are never sent to it. Without a
+  key, or when rate-limited, a deterministic summarizer runs and the UI labels which one was used.
+- F8 Mission-control web UI: Hilbert-cell map with novelty heatmap; outbox/sync status with **Cut network**
+  button and bytes counter; decision explainer (sync and abstain/escalate decisions); conflict inbox;
+  **sync-diff screen** (F12); memory browser with provenance badges (F11); search box showing confidence and route.
+- F9 Measured numbers, one command (`make verify`): p50/p95 offline hybrid-search latency, recall@10 of the
+  edge index vs. the full cloud index, bytes synced vs. naive sync at each novelty threshold (hero chart),
+  sync convergence time after an outage, and a **negative control** (random memories must score as novel and
+  must not be suppressed). Numbers are printed and written to `benchmarks/results/`.
+- F10 **Abstain / escalate gate** (query-side local-vs-cloud decision): every answer carries a confidence
+  computed from top score, margin over runner-up, calibrated novelty and staleness of the matched memory.
+  Outcomes: `ANSWER_LOCAL` (confident), `ESCALATE_CLOUD` (low confidence and online: ask the cloud/LLM over
+  fleet memory, then cache the answer back), `LOW_CONFIDENCE_OFFLINE` (low confidence and offline: answer is
+  returned but explicitly flagged, never presented as certain). Thresholds come from the benchmark, not guesses.
+- F11 **Provenance and versioning on every record**: `device_id`, `observed_at`, `confidence`, `sync_state`
+  (`local_only` | `queued` | `synced` | `conflict`), monotonic `version`, and a `content_hash`. A per-shard
+  **digest** (hash over sorted `id:version`) detects edge/server divergence cheaply.
+- F12 **Sync-diff view**: local shard vs. cloud collection, computed from digests + versions, listing exactly
+  what will be pushed, pulled, or reconciled. It is both the engine's plan and a UI screen.
 
 **Stretch (only after F1-F9 are demoed end-to-end)**
 - MCP tools over edge memory (`loci-mcp` already exists; point it at `EdgeStore`) so an LLM agent queries
   offline memory live.
 - Decay-based archive of stale memories using Edge `Formula`/`DecayKind`.
 - Binary quantization on the Edge shard with measured recall.
+
+**Packaging (adopted, cheap):** one-command setup, a scripted and clearly labelled *synthetic* demo
+("go offline, add data, reconnect, watch the sync"), and a README Limitations section stating what is
+simulated (robot sensor stream, `LocalCloud`) and what is real (Edge shards, outbox, sync, benchmarks).
 
 **Explicitly cut:** field-level 3-way merge, rollback, priority lanes beyond one urgent lane, redaction tiers,
 device roster, chaos suite (keep one convergence test + one netsplit test), docker polish beyond a compose file.
@@ -118,10 +139,10 @@ device roster, chaos suite (keep one convergence test + one netsplit test), dock
 |-------|------|-------------|-----------------------------------|
 | **P0 Vertical slice** | 1-2 | `EdgeStore` minimal + outbox + `LocalCloud`; script: write offline → queue → push → print bytes | Script runs end to end; existing 655 tests untouched and green |
 | **P1 Edge backend, full** | 2-4 | F1+F2: full store surface, parametrized run of `tests/test_local_client.py` against Edge, hybrid search, Hilbert integer indexes | Local-client suite passes on Edge (document any principled diffs, e.g. scroll order) |
-| **P2 Sync brain** | 4-6 | F3+F4+F5: policy + decision records + backoff + push/pull + netsplit | Netsplit test: writes during outage, reconnect, both sides converge; decision log explains every item |
+| **P2 Sync brain** | 4-6 | F3+F4+F5+F11+F12 (provenance, digests, diff): policy + decision records + backoff + push/pull + netsplit | Netsplit test: writes during outage, reconnect, both sides converge; decision log explains every item |
 | **P3 UI thin** | 5-7 | F8 (parallel to P2 once APIs exist) | Judge can run the full story from the browser alone |
-| **P4 Conflicts + cloud loop** | 6-8 | F6+F7 | Two simulated devices disagree; inbox shows resolution; cloud summary appears in the other device's mirror |
-| **P5 Numbers + demo** | 8-9 | F9 hero chart, README rewrite around the one thesis, 3-min script, **recorded video (insurance)** | Video recorded by Day 8 |
+| **P4 Conflicts + cloud loop + gate** | 6-8 | F6+F7+F10 | Two simulated devices disagree; inbox shows resolution; cloud summary appears in the other device's mirror |
+| **P5 Numbers + demo** | 8-9 | F9 (`make verify`, hero chart, negative control), README rewrite around the one thesis, 3-min script, **recorded video (insurance)** | Video recorded by Day 8 |
 | **P6 Freeze / stretch** | 9-10 | Feature freeze Day 8; only bugfix + stretch (MCP, decay) | CI green, fresh-clone quickstart works with **no Docker** |
 
 Schedule rule: UI must show *something real* by Day 6; polish is not left to the last day.
@@ -136,7 +157,19 @@ Schedule rule: UI must show *something real* by Day 6; polish is not left to the
 | Judges know memory-fleet | Do not clone it; differentiate on calibrated surprise + geometric conflicts; cite it honestly |
 | Refactor breaks 655 tests | Third backend only; no changes to existing clients beyond an injectable store |
 
-## 8. Open questions for the team
-1. Which single hero scenario: **warehouse patrol robot** (recommended, matches LOCI) or field-inspector notes?
-2. Is an Anthropic/other LLM API key allowed in the demo, or must the cloud summarizer be fully deterministic?
-3. Is Docker/Qdrant Server guaranteed at the offline finale (11 Oct), or must everything run bare?
+## 8. Decisions (confirmed by the team)
+1. Hero scenario: **warehouse patrol robot**. A short non-robot variant stays in the README only.
+2. LLM: free-tier keys only (Groq, Cerebras or Gemini); no paid services. Optional, with deterministic fallback.
+3. Qdrant Server is **not guaranteed**: `LocalCloud` is the default demo path; `QdrantServerCloud` is optional
+   and only exercised when a server is reachable.
+
+## 9. Ideas adopted from the abstain-gate reference
+| Idea | Decision |
+|------|----------|
+| Fail-closed / abstain gate | Adopted as F10: the principled query-side local-vs-cloud rule |
+| Measured numbers, negative control, one command | Adopted into F9 |
+| Provenance on every record | Adopted as F11 |
+| Snapshot IDs / staleness fingerprints | Adopted as per-shard digest + per-point version/hash (F11) |
+| Diff of two arms | Adopted as the sync-diff view (F12) |
+| Multiple surfaces on one core | UI is required; MCP stays a cheap stretch |
+| Honest packaging | Adopted (Packaging paragraph, section 5) |
