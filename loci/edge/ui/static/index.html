@@ -57,8 +57,19 @@ button.net.off { border-color: var(--bad); color: var(--bad); background: rgba(2
 .b-SYNC_NOW { background: var(--sync); } .b-DEDUPE { background: var(--dedupe); }
 .b-SUMMARIZE_SYNC { background: var(--summ); } .b-KEEP_LOCAL { background: var(--local); }
 .b-PRIVATE { background: var(--priv); }
-.b-mirror { background: transparent; border: 1px solid var(--muted); color: var(--muted); }
+.b-ANSWER_LOCAL { background: var(--sync); } .b-ESCALATE_CLOUD { background: var(--accent); }
+.b-LOW_CONFIDENCE_OFFLINE { background: var(--summ); } .b-ABSTAIN { background: var(--bad); }
+.b-MERGED, .b-APPROVED { background: var(--sync); } .b-MOVED { background: var(--accent); }
+.b-REVIEW { background: var(--summ); } .b-REJECTED { background: var(--dedupe); }
+.b-mirror, .b-cloud { background: transparent; border: 1px solid var(--muted); color: var(--muted); }
 .b-local { background: var(--accent); }
+.b-cloud { border-color: var(--accent); color: var(--accent); }
+.conf { margin: 6px 0 10px; }
+.conf .bar { height: 7px; }
+.conf .bar i { background: var(--sync); }
+button.mini { font: inherit; font-size: 12px; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; cursor: pointer; margin-right: 6px; }
+button.mini:hover { border-color: var(--accent); }
+label.chk { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .feed, .list { max-height: 330px; overflow: auto; margin: 0; padding: 0; list-style: none; }
 .feed li, .list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .feed li:last-child, .list li:last-child { border: 0; }
@@ -116,6 +127,8 @@ svg { width: 100%; height: auto; display: block; border-radius: 8px; background:
       <button class="act" data-act="spill" type="button">Report oil spill (urgent)</button>
       <button class="act" data-act="toolbox" type="button">See the red toolbox</button>
       <button class="act" data-act="private" type="button">Private note</button>
+      <button class="act" data-path="/api/scenario/both-toolbox" data-act="both" type="button">Both robots see the toolbox</button>
+      <button class="act" data-act="blurry" type="button">Blurry toolbox view</button>
       <button class="act" data-act="sync" type="button">Sync now</button>
     </div>
     <div class="lanes" id="lanes"></div>
@@ -136,13 +149,24 @@ svg { width: 100%; height: auto; display: block; border-radius: 8px; background:
   </section>
 
   <section class="card">
-    <h2>Search this robot's memory (hybrid, works offline)</h2>
+    <h2>Ask this robot &middot; answers only when confident</h2>
     <form class="search" id="sform">
-      <input type="search" id="q" placeholder="e.g. oil spill, toolbox, charging" aria-label="Search query" autocomplete="off">
-      <button class="act" type="submit">Search</button>
+      <input type="search" id="q" placeholder="e.g. oil spill, where is the toolbox, charging" aria-label="Question" autocomplete="off">
+      <button class="act" type="submit">Ask</button>
     </form>
+    <label class="chk"><input type="checkbox" id="hist"> include superseded positions (history)</label>
+    <div id="route"></div>
     <div class="muted" id="smeta"></div>
     <ul class="list" id="results"></ul>
+  </section>
+
+  <section class="card wide">
+    <h2>Cloud &middot; conflict inbox &amp; fleet briefings</h2>
+    <div class="row" id="cloudhead" style="margin-bottom:8px"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+      <div><div class="muted" style="margin-bottom:6px">Reconciler audit &amp; review inbox</div><ul class="list" id="inbox"></ul></div>
+      <div><div class="muted" style="margin-bottom:6px">Briefings pushed down to every robot</div><ul class="list" id="insights"></ul></div>
+    </div>
   </section>
 
   <section class="card">
@@ -157,6 +181,7 @@ svg { width: 100%; height: auto; display: block; border-radius: 8px; background:
 const COLORS = { SYNC_NOW: "--sync", DEDUPE: "--dedupe", SUMMARIZE_SYNC: "--summ", KEEP_LOCAL: "--local" };
 const LABEL = { SYNC_NOW: "SYNC NOW", DEDUPE: "DEDUPE", SUMMARIZE_SYNC: "SUMMARIZE", KEEP_LOCAL: "KEEP LOCAL" };
 let robot = null, robots = [], busy = false;
+const ROUTE = { ANSWER_LOCAL: "ANSWERED LOCALLY", ESCALATE_CLOUD: "ESCALATED TO CLOUD", LOW_CONFIDENCE_OFFLINE: "LOW CONFIDENCE (OFFLINE)", ABSTAIN: "ABSTAINED" };
 
 const $ = (id) => document.getElementById(id);
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -281,6 +306,38 @@ function renderMap(m) {
     h("span", {}, "◇ landmark"), h("span", {}, "◌ from fleet mirror"), h("span", {}, "shading = mean novelty of the cell"));
 }
 
+function renderCloud(c) {
+  const head = $("cloudhead");
+  const roles = Object.entries(c.roles).map(([k, v]) => `${v} ${k}`).join(" · ");
+  head.replaceChildren(
+    h("span", { class: "chip", text: c.llm.enabled ? `LLM briefings: ${c.llm.provider} / ${c.llm.model}` : "LLM off — deterministic briefings (set GROQ_API_KEY, CEREBRAS_API_KEY or GEMINI_API_KEY)" }),
+    h("span", { class: "chip", text: `cloud memories: ${roles || "none"}` }),
+    h("span", { class: "chip", text: `pending review: ${c.conflict_counts.pending_review || 0}` }));
+  const inbox = $("inbox");
+  inbox.replaceChildren(...c.conflicts.map((x) => {
+    const e = x.evidence, pending = x.status === "pending_review";
+    const label = pending ? "REVIEW" : x.status === "approved" ? "APPROVED" : x.status === "rejected" ? "REJECTED" : x.rule === "moved" ? "MOVED" : "MERGED";
+    const li = h("li", {},
+      h("div", { class: "row" }, h("span", { class: `badge b-${label}`, text: label }), h("b", { text: (e.a && e.a.text) || x.rule }),
+        h("span", { class: "mono", text: `${ago(x.ts_ms)}` })),
+      h("div", { class: "reason", text: e.rule || "similar, but not similar enough to merge automatically: needs a human decision" }),
+      h("div", { class: "mono", text: `similarity ${e.similarity} · ${e.a.device} vs ${e.b.device} · apart ${e.displacement} · ${Math.round(e.dt_ms / 1000)}s apart` }));
+    if (pending) {
+      const go = (ap) => async () => { try { await api(`/api/conflicts/${x.id}/resolve`, { body: { approve: ap } }); toast(ap ? "Merged: same object" : "Kept separate"); } catch (er) { toast("Error: " + er.message); } refresh(); };
+      const yes = h("button", { class: "mini", type: "button", text: "Same object: merge" }); yes.onclick = go(true);
+      const no = h("button", { class: "mini", type: "button", text: "Different: keep separate" }); no.onclick = go(false);
+      li.append(h("div", { style: "margin-top:6px" }, yes, no));
+    }
+    return li;
+  }));
+  if (!c.conflicts.length) inbox.append(h("li", { class: "muted", text: "No conflicts yet. Cut both networks, press “Both robots see the toolbox”, restore, sync." }));
+  const ins = $("insights");
+  ins.replaceChildren(...c.insights.map((i) => h("li", {},
+    h("div", { class: "row" }, h("span", { class: "badge b-cloud", text: i.generator === "deterministic" ? "RULE-BASED" : String(i.generator).toUpperCase() }), h("span", { class: "mono", text: `v${i.version} · ${ago(i.timestamp_ms)}` })),
+    h("div", { text: i.text }))));
+  if (!c.insights.length) ins.append(h("li", { class: "muted", text: "Briefings appear after robots sync." }));
+}
+
 async function refresh() {
   if (busy) return; busy = true;
   try {
@@ -290,6 +347,7 @@ async function refresh() {
     renderTabs(state); renderHeader(state); renderControls(state);
     const dash = await api(`/api/robots/${robot}/dashboard`);
     renderFeed(dash.decisions); renderDiff(dash.diff); renderMap(dash.map);
+    renderCloud(await api("/api/cloud"));
   } catch (e) { toast("Error: " + e.message); } finally { busy = false; }
 }
 
@@ -298,9 +356,10 @@ document.querySelectorAll("button.act[data-act]").forEach((b) => {
     const act = b.dataset.act;
     try {
       const body = act === "patrol" ? { steps: +b.dataset.arg } : {};
-      const r = await api(`/api/robots/${robot}/${act}`, { body });
+      const r = await api(b.dataset.path || `/api/robots/${robot}/${act}`, { body });
       if (act === "patrol") toast(`${robot}: ${r.steps} steps → ` + Object.entries(r.decisions).map(([k, v]) => `${v} ${LABEL[k]}`).join(", "));
       else if (act === "sync") toast(r.link_down ? `${robot} is offline: queued safely` : `${robot}: sent ${r.sent}, summarized ${r.summarized}, pulled ${r.pulled}`);
+      else if (act === "both") toast("Both robots reported the toolbox — sync to let the cloud reconcile");
       else toast(`${robot}: ${LABEL[r.action]} — ${r.reason}`);
     } catch (e) { toast("Error: " + e.message); }
     refresh();
@@ -311,12 +370,19 @@ $("sform").onsubmit = async (ev) => {
   ev.preventDefault();
   const q = $("q").value.trim(); if (!q) return;
   try {
-    const r = await api(`/api/robots/${robot}/search?q=${encodeURIComponent(q)}`);
-    $("smeta").textContent = `${r.results.length} results in ${r.latency_ms} ms · ${r.online ? "online" : "OFFLINE — answered entirely from this device"}`;
-    $("results").replaceChildren(...r.results.map((x) => h("li", {},
-      h("div", { class: "row" }, h("span", { class: `badge b-${x.source}`, text: x.source.toUpperCase() }), h("b", { text: x.text || "(summary)" }), h("span", { class: "mono", text: `score ${x.score}` })),
-      h("div", { class: "mono", text: `${x.device_id} · v${x.version} · ${x.sync_state} · #${x.content_hash} · (${(+x.x).toFixed(2)}, ${(+x.y).toFixed(2)})${x.private ? " · private" : ""}` }))));
-    if (!r.results.length) $("results").append(h("li", { class: "muted", text: "No matches." }));
+    const r = await api(`/api/robots/${robot}/ask?q=${encodeURIComponent(q)}&history=${$("hist").checked}`);
+    const pct = Math.round(r.confidence * 100), c = r.components;
+    $("route").replaceChildren(
+      h("div", { class: "row" }, h("span", { class: `badge b-${r.route}`, text: ROUTE[r.route] }), h("b", { text: `confidence ${pct}%` }), h("span", { class: "mono", text: `threshold ${Math.round(r.thresholds.answer_threshold * 100)}%` })),
+      h("div", { class: "conf" }, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
+      h("div", { class: "mono", text: `similarity ${c.similarity} · wording ${c.lexical} · margin ${c.margin} · staleness −${c.stale}` }),
+      h("div", { class: "reason", text: r.reason + (r.cached ? ` · cached ${r.cached} memor${r.cached === 1 ? "y" : "ies"} to this robot's mirror` : "") }));
+    $("smeta").textContent = `${r.latency_ms} ms · ${r.online ? "online" : "OFFLINE — answered entirely from this device"}`;
+    $("results").replaceChildren(...r.hits.map((x) => h("li", {},
+      h("div", { class: "row" }, h("span", { class: `badge b-${x.source}`, text: x.source.toUpperCase() }), x.role ? h("span", { class: "badge b-KEEP_LOCAL", text: x.role }) : null,
+        h("b", { text: x.text || "(summary)" }), h("span", { class: "mono", text: `score ${x.score}` })),
+      h("div", { class: "mono", text: `${x.device_id} · v${x.version} · ${x.sync_state || ""} · #${x.content_hash} · (${(+x.x).toFixed(2)}, ${(+x.y).toFixed(2)})${x.generator ? " · " + x.generator : ""}` }))));
+    if (!r.hits.length) $("results").append(h("li", { class: "muted", text: "No answer given: nothing relevant is known with enough confidence." }));
   } catch (e) { toast("Error: " + e.message); }
 };
 

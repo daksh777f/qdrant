@@ -237,3 +237,22 @@ def test_policy_saves_most_bytes_without_losing_landmarks(world):
     for base, _x in lms:
         top = r.store.search(vector=base.tolist(), limit=1)[0]
         assert top.id in cloud_ids
+
+
+def test_lookalike_of_another_devices_memory_is_sent_for_the_cloud_to_adjudicate(world):
+    a, b = world("robot-a"), world("robot-b")
+    base = unit(40)
+    a.engine.observe(obs("box", base, x=0.3, seed=1))
+    a.engine.push()
+    b.engine.pull()
+    # ~0.90 cosine: not the same thing for sure, not different for sure.
+    u = np.random.default_rng(5).normal(size=DIM)
+    u -= (u @ base) * base
+    u /= np.linalg.norm(u)
+    blurry = 0.90 * base + np.sqrt(1 - 0.90**2) * u
+    m = Memory("blurry", blurry.tolist(), 0.3, 0.5, 0.0, 2_000)
+    d = b.engine.observe(m)
+    assert d.action == "SYNC_NOW" and "adjudicate" in d.reason and d.neighbor_source == "mirror"
+    # The same look-alike seen by the robot that owns the original stays a local matter.
+    d2 = a.engine.observe(Memory("blurry-a", blurry.tolist(), 0.3, 0.5, 0.0, 3_000))
+    assert "adjudicate" not in d2.reason
