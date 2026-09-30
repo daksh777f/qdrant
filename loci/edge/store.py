@@ -16,7 +16,7 @@ from typing import Any
 import qdrant_edge as qe
 
 from loci.edge.ids import content_hash, memory_id
-from loci.edge.qdrant_ops import InstrumentedShard, OpsLog
+from loci.edge.qdrant_ops import InstrumentedShard, OpsLog, UpdateOps
 from loci.spatial.hilbert import HilbertIndex
 
 _INT_FIELDS = ("timestamp_ms",)
@@ -126,7 +126,7 @@ class EdgeMemoryStore:
         wanted += [(f, qe.PayloadSchemaType.Keyword) for f in _KEYWORD_FIELDS]
         for field_name, schema in wanted:
             if field_name not in have:
-                shard.update(qe.UpdateOperation.create_field_index(field_name, schema))
+                shard.update(UpdateOps.create_field_index(field_name, schema))
 
     # -- write ---------------------------------------------------------
 
@@ -160,15 +160,13 @@ class EdgeMemoryStore:
         vectors: dict[str, Any] = {"dense": mem.vector}
         if mem.text:
             vectors["bm25"] = self._bm25.embed_document(mem.text)
-        self._shard.update(qe.UpdateOperation.upsert_points([qe.Point(mem_id, vectors, payload)]))
+        self._shard.update(UpdateOps.upsert_points([qe.Point(mem_id, vectors, payload)]))
         mem.id, mem.version, mem.sync_state, mem.device_id = mem_id, version, "local_only", device
         return mem
 
     def set_sync_state(self, ids: list[str], state: str) -> None:
         if ids:
-            self._shard.update(
-                qe.UpdateOperation.set_payload(list[Any](ids), {"sync_state": state})
-            )
+            self._shard.update(UpdateOps.set_payload(list[Any](ids), {"sync_state": state}))
 
     # -- read ----------------------------------------------------------
 
@@ -270,7 +268,7 @@ class EdgeMemoryStore:
                 vectors["bm25"] = self._bm25.embed_document(payload["text"])
             ops.append(qe.Point(p["id"], vectors, payload))
         if ops:
-            self._mirror.update(qe.UpdateOperation.upsert_points(ops))
+            self._mirror.update(UpdateOps.upsert_points(ops))
 
     @property
     def has_mirror(self) -> bool:
@@ -294,7 +292,7 @@ class EdgeMemoryStore:
         Roles are cloud metadata, not new content, so the device-owned ``version`` is untouched.
         """
         for pid, fields in updates.items():
-            self._shard.update(qe.UpdateOperation.set_payload([pid], fields))
+            self._shard.update(UpdateOps.set_payload([pid], fields))
 
     @staticmethod
     def _iter(shard: Any):
@@ -405,7 +403,7 @@ class EdgeMemoryStore:
             return False
         n = int((recs[0].payload or {}).get("seen_count", 1)) + 1
         self._shard.update(
-            qe.UpdateOperation.set_payload([point_id], {"seen_count": n, "last_seen_ms": now_ms})
+            UpdateOps.set_payload([point_id], {"seen_count": n, "last_seen_ms": now_ms})
         )
         return True
 

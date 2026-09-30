@@ -37,7 +37,7 @@ def _spawn_nodes(n: int, base: str, interval: float) -> list[subprocess.Popen]:
                     "--cloud",
                     base,
                     "--data",
-                    os.path.join("edge-nodes", name),
+                    os.path.join(os.environ.get("LOCI_NODES_DIR", "edge-nodes"), name),
                     "--interval",
                     str(interval),
                     "--exit-with-parent",

@@ -14,6 +14,8 @@ from typing import Any, Protocol
 
 import qdrant_edge as qe
 
+from loci.edge.qdrant_ops import UpdateOps
+
 
 class LinkDown(ConnectionError):
     """Raised by a cloud call while the (simulated) link is down."""
@@ -207,7 +209,7 @@ class LocalCloud:
         to_write, received = plan_upsert(points, existing)
         if to_write:
             self._shard.update(
-                qe.UpdateOperation.upsert_points(
+                UpdateOps.upsert_points(
                     [qe.Point(w["id"], {"dense": w["vector"]}, w["payload"]) for w in to_write]
                 )
             )
@@ -286,7 +288,7 @@ class LocalCloud:
             if pid not in current:
                 continue
             rrev = int(current[pid].get("rrev", 0)) + 1
-            self._shard.update(qe.UpdateOperation.set_payload([pid], {**fields, "rrev": rrev}))
+            self._shard.update(UpdateOps.set_payload([pid], {**fields, "rrev": rrev}))
             n += 1
         return n
 

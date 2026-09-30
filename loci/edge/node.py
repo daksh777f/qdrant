@@ -266,7 +266,9 @@ def main() -> None:
     ap.add_argument("--data", default=None, help="data directory (default ./edge-nodes/NAME)")
     ap.add_argument("--token", default=None, help="cloud token (or LOCI_CLOUD_TOKEN)")
     ap.add_argument(
-        "--embedder", default="hash:64", help="must match the fleet's (default hash:64)"
+        "--embedder",
+        default=os.environ.get("LOCI_EMBEDDER", "hash:64"),
+        help="must match the fleet's (default: LOCI_EMBEDDER or hash:64)",
     )
     ap.add_argument("--interval", type=float, default=1.0, help="seconds per patrol step")
     ap.add_argument("--steps", type=int, default=0, help="stop after N ticks (0 = run forever)")

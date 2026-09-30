@@ -3,191 +3,319 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<title>LOCI Edge Mission Control</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1622'/%3E%3Cpath d='M9 8v16h14' stroke='%234cc2ff' stroke-width='3.2' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='21' cy='11' r='3.2' fill='%2334d399'/%3E%3C/svg%3E">
+<title>LOCI Edge · Mission Control</title>
 <style>
 :root {
-  --bg: #0b1017; --panel: #121a24; --panel2: #182230; --line: #243247;
-  --text: #e6edf5; --muted: #8fa3ba; --accent: #4cc2ff;
-  --sync: #34d399; --dedupe: #94a3b8; --summ: #fbbf24; --local: #60a5fa; --priv: #c4b5fd;
-  --bad: #f87171; --ok: #34d399;
+  color-scheme: dark;
+  --bg: #070b11; --bg2: #0b121b; --panel: #0f1823; --panel2: #152131; --panel3: #1b2a3d;
+  --line: #1f2f44; --line2: #2a3f59;
+  --text: #e8eef6; --muted: #8ea2ba; --faint: #5f7590;
+  --accent: #4cc2ff; --accent2: #7c8cff;
+  --sync: #34d399; --dedupe: #8b9bb0; --summ: #fbbf24; --local: #60a5fa; --priv: #c4b5fd;
+  --bad: #f87171; --ok: #34d399; --warn: #fbbf24;
+  --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.25);
 }
 :root[data-theme="light"] {
-  --bg: #f3f6fa; --panel: #ffffff; --panel2: #eef2f7; --line: #d5deea;
-  --text: #14202e; --muted: #56697f; --accent: #0a6dc2;
+  color-scheme: light;
+  --bg: #eef2f7; --bg2: #e6ecf3; --panel: #ffffff; --panel2: #f3f6fa; --panel3: #e8eef5;
+  --line: #d7e0ea; --line2: #c3cfdc;
+  --text: #0f1b2a; --muted: #52667d; --faint: #7a8ca1;
+  --accent: #0a6dc2; --accent2: #4f46e5;
   --sync: #0f9d6b; --dedupe: #64748b; --summ: #b7791f; --local: #2563eb; --priv: #7c3aed;
-  --bad: #c62828; --ok: #0f9d6b;
+  --bad: #c62828; --ok: #0f9d6b; --warn: #b7791f;
+  --shadow: 0 1px 2px rgba(15,27,42,.06), 0 6px 18px rgba(15,27,42,.06);
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text);
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 14px 20px;
-  border-bottom: 1px solid var(--line); background: var(--panel); }
-h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
-h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
-h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
-  margin: 0 0 10px; font-weight: 600; }
-.stats { display: flex; flex-wrap: wrap; gap: 20px; margin-left: auto; }
-.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
-.stat span { color: var(--muted); font-size: 12px; }
-.tabs { display: flex; gap: 8px; padding: 12px 20px 0; flex-wrap: wrap; }
-.tab { background: var(--panel); border: 1px solid var(--line); color: var(--text);
-  padding: 8px 14px; border-radius: 8px; cursor: pointer; font: inherit; display: flex; gap: 8px; align-items: center; }
-.tab[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); display: inline-block; }
-.dot.on { background: var(--ok); }
-main { display: grid; gap: 14px; padding: 14px 20px 30px;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
-.wide { grid-column: span 2; }
-@media (max-width: 800px) { .wide { grid-column: span 1; } }
-button.act, button.net { font: inherit; color: var(--text); background: var(--panel2);
-  border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
-button.act:hover { border-color: var(--accent); }
-button:focus-visible, input:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-button.net { width: 100%; font-size: 15px; font-weight: 600; padding: 12px; margin-bottom: 12px; }
-button.net.on { border-color: var(--ok); color: var(--ok); }
-button.net.off { border-color: var(--bad); color: var(--bad); background: rgba(248,113,113,.08); }
-.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.lanes { display: flex; gap: 8px; margin: 12px 0 6px; flex-wrap: wrap; }
-.chip { background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+html, body { background: var(--bg); }
+body { margin: 0; color: var(--text); font: 14px/1.45 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.mono, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+button { font: inherit; }
+button:focus-visible, input:focus-visible, [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- header ---------- */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 22px;
+  background: linear-gradient(180deg, var(--bg2), var(--bg)); border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand svg { flex: none; }
+.brand b { font-size: 18px; letter-spacing: .01em; }
+.brand span { display: block; color: var(--muted); font-size: 12.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.chip b { color: var(--text); font-weight: 600; }
+.chip.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); color: var(--warn); }
+.chip.ok b { color: var(--ok); }
+.chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.theme { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+
+/* ---------- KPIs ---------- */
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; padding: 14px 22px 0; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); min-width: 0; }
+.kpi span { color: var(--muted); font-size: 12px; display: block; }
+.kpi b { display: block; font-size: 24px; font-weight: 650; margin-top: 2px; letter-spacing: -.01em; }
+.kpi small { color: var(--faint); font-size: 11.5px; }
+@media (max-width: 1100px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- layout ---------- */
+.layout { display: grid; grid-template-columns: 300px minmax(0, 1fr) 360px; gap: 14px; padding: 14px 22px; align-items: start; }
+@media (max-width: 1280px) { .layout { grid-template-columns: 280px minmax(0, 1fr); } .inspector { grid-column: 1 / -1; } }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); min-width: 0; }
+.card h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 10px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.card h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--faint); margin-left: auto; font-size: 11.5px; }
+.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 1100px) { .row2 { grid-template-columns: minmax(0, 1fr); } }
+.bottom { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; padding: 0 22px 28px; }
+@media (max-width: 1100px) { .bottom { grid-template-columns: minmax(0, 1fr); } }
 .muted { color: var(--muted); }
-.badge { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;
-  letter-spacing: .03em; color: #0b1017; }
+.faint { color: var(--faint); }
+
+/* ---------- fleet ---------- */
+.devlist { display: flex; flex-direction: column; gap: 8px; }
+.dev { text-align: left; width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 11px; padding: 10px 11px; cursor: pointer; color: var(--text); display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; align-items: center; }
+.dev[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.dev .dot { grid-row: span 2; }
+.dev b { font-weight: 650; }
+.dev .kind { font-size: 11px; color: var(--muted); grid-column: 2 / 4; }
+.dev .n { font-size: 11.5px; color: var(--muted); text-align: right; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); display: inline-block; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 20%, transparent); }
+.dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
+.tag { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line2); color: var(--muted); }
+.tag.proc { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--accent); }
+
+button.net { width: 100%; font-size: 15px; font-weight: 650; padding: 12px; margin-bottom: 10px; border-radius: 10px; cursor: pointer; background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+button.net.on { border-color: var(--ok); color: var(--ok); }
+button.net.off { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, var(--panel2)); }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+button.act { color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
+button.act:hover { border-color: var(--accent); }
+button.act.primary { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--accent); }
+.lanes { display: flex; gap: 6px; margin: 10px 0 4px; flex-wrap: wrap; }
+.pill { background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; color: var(--muted); }
+.meter { display: grid; grid-template-columns: 76px 1fr auto; gap: 8px; align-items: center; font-size: 12px; margin: 5px 0; color: var(--muted); }
+.meter .track { height: 6px; background: var(--panel3); border-radius: 4px; overflow: hidden; }
+.meter .track i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.meter b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12.5px; }
+.kv span { color: var(--muted); }
+
+/* ---------- badges & lists ---------- */
+.badge { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 10.5px; font-weight: 750; letter-spacing: .04em; color: #07111b; white-space: nowrap; }
 .b-SYNC_NOW { background: var(--sync); } .b-DEDUPE { background: var(--dedupe); }
-.b-SUMMARIZE_SYNC { background: var(--summ); } .b-KEEP_LOCAL { background: var(--local); }
-.b-PRIVATE { background: var(--priv); }
+.b-SUMMARIZE_SYNC { background: var(--summ); } .b-KEEP_LOCAL { background: var(--local); } .b-PRIVATE { background: var(--priv); }
 .b-ANSWER_LOCAL { background: var(--sync); } .b-ESCALATE_CLOUD { background: var(--accent); }
 .b-LOW_CONFIDENCE_OFFLINE { background: var(--summ); } .b-ABSTAIN { background: var(--bad); }
 .b-MERGED, .b-APPROVED { background: var(--sync); } .b-MOVED { background: var(--accent); }
 .b-REVIEW { background: var(--summ); } .b-REJECTED { background: var(--dedupe); }
-.b-mirror, .b-cloud { background: transparent; border: 1px solid var(--muted); color: var(--muted); }
-.b-local { background: var(--accent); }
+.b-local { background: var(--accent); } .b-mirror, .b-cloud { background: transparent; border: 1px solid var(--muted); color: var(--muted); }
 .b-cloud { border-color: var(--accent); color: var(--accent); }
-.conf { margin: 6px 0 10px; }
-.conf .bar { height: 7px; }
-.conf .bar i { background: var(--sync); }
-button.mini { font: inherit; font-size: 12px; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; cursor: pointer; margin-right: 6px; }
-button.mini:hover { border-color: var(--accent); }
-label.chk { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; margin-bottom: 8px; }
-.feed, .list { max-height: 330px; overflow: auto; margin: 0; padding: 0; list-style: none; }
-.feed li, .list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
-.feed li:last-child, .list li:last-child { border: 0; }
+.b-PASS { background: var(--ok); } .b-FAIL { background: var(--bad); }
+.list { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow: auto; }
+.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.list li:last-child { border-bottom: 0; }
 .row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .reason { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
-.bar { height: 5px; background: var(--panel2); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+.small { font-size: 11.5px; color: var(--faint); }
+.bar { height: 4px; background: var(--panel3); border-radius: 3px; margin-top: 5px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--summ); }
-.diffgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
-.diffgrid div { background: var(--panel2); border-radius: 8px; padding: 8px; text-align: center; }
-.diffgrid b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+
+/* ---------- map ---------- */
+.mapwrap { position: relative; }
+svg.map { width: 100%; height: auto; display: block; border-radius: 10px; background: var(--panel2); }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+/* ---------- ask ---------- */
+form.search { display: flex; gap: 8px; }
+input[type=search] { flex: 1; min-width: 0; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; }
+.opts { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0; font-size: 12px; color: var(--muted); }
+.opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.conf { height: 8px; background: var(--panel3); border-radius: 5px; overflow: hidden; margin: 6px 0; position: relative; }
+.conf i { display: block; height: 100%; background: var(--sync); }
+.conf s { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: .6; }
+
+/* ---------- diff ---------- */
+.diffgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 8px 0 10px; }
+@media (max-width: 700px) { .diffgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.diffgrid div { background: var(--panel2); border-radius: 9px; padding: 7px; text-align: center; }
+.diffgrid b { display: block; font-size: 19px; font-variant-numeric: tabular-nums; }
 .diffgrid span { font-size: 11px; color: var(--muted); }
-.verdict { font-weight: 700; padding: 3px 10px; border-radius: 6px; font-size: 12px; }
-.verdict.ok { background: rgba(52,211,153,.15); color: var(--ok); }
-.verdict.no { background: rgba(251,191,36,.15); color: var(--summ); }
-.verdict.off { background: rgba(248,113,113,.15); color: var(--bad); }
-form.search { display: flex; gap: 8px; margin-bottom: 10px; }
-input[type=search] { flex: 1; font: inherit; color: var(--text); background: var(--panel2);
-  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--muted); }
-svg { width: 100%; height: auto; display: block; border-radius: 8px; background: var(--panel2); }
-.legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
-.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
-#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel);
-  border: 1px solid var(--accent); padding: 9px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s;
-  pointer-events: none; max-width: 90vw; z-index: 5; }
+.verdict { font-weight: 700; padding: 2px 9px; border-radius: 6px; font-size: 12px; }
+.verdict.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.verdict.no { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.verdict.off { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
+
+/* ---------- inspector ---------- */
+.feats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.feat { background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 7px 9px; font-size: 12px; opacity: .45; }
+.feat.on { opacity: 1; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.feat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+table.t { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.t th { text-align: left; color: var(--faint); font-weight: 600; padding: 4px 4px; border-bottom: 1px solid var(--line); }
+table.t td { padding: 5px 4px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+table.t td.num, table.t th.num { text-align: right; }
+.ops { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; font-size: 11.5px; }
+.ops li { display: grid; grid-template-columns: 62px 64px 1fr 58px; gap: 6px; padding: 4px 0; border-bottom: 1px dashed var(--line); align-items: baseline; }
+.ops .op { font-weight: 700; }
+.op-query { color: var(--accent); } .op-update { color: var(--sync); } .op-facet { color: var(--accent2); } .op-scroll, .op-retrieve, .op-count { color: var(--muted); }
+
+/* ---------- evidence ---------- */
+.prov { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line2); color: var(--muted); }
+.prov.real { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); color: var(--ok); }
+.prov.syn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); color: var(--warn); }
+.checks { display: grid; grid-template-columns: 1fr; gap: 4px; font-size: 12.5px; }
+.checks div { display: flex; gap: 8px; align-items: baseline; }
+
+button.mini { color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; cursor: pointer; margin-right: 6px; font-size: 12px; }
+button.mini:hover { border-color: var(--accent); }
+#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--accent); padding: 10px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 20; box-shadow: var(--shadow); }
 #toast.show { opacity: 1; }
-.theme { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
+@media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.8s ease-out infinite; transform-origin: center; transform-box: fill-box; } @keyframes pulse { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.6); } } }
 </style>
 </head>
 <body>
-<header>
-  <h1>LOCI Edge <small>Mission Control &middot; synthetic warehouse demo</small></h1>
-  <div class="stats" aria-live="polite">
-    <div class="stat"><b id="s-cloud">0</b><span>memories in cloud</span></div>
-    <div class="stat"><b id="s-sent">0 B</b><span>sent (raw + summaries)</span></div>
-    <div class="stat"><b id="s-naive">0 B</b><span>naive sync (estimate)</span></div>
-    <div class="stat"><b id="s-saved">0%</b><span>bandwidth saved</span></div>
+<header class="top">
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--panel3)"/><path d="M9 8v16h14" stroke="var(--accent)" stroke-width="3" fill="none" stroke-linecap="round"/><circle cx="21" cy="11" r="3.2" fill="var(--ok)"/></svg>
+    <div><b>LOCI Edge</b><span>Mission Control · offline-first memory for robot fleets, on Qdrant Edge</span></div>
   </div>
+  <div class="chips" id="chips"></div>
   <button class="theme" id="theme" type="button">Light / dark</button>
 </header>
-<div class="tabs" role="tablist" id="tabs"></div>
-<main id="main" hidden>
-  <section class="card wide">
-    <h2>Warehouse map &middot; Hilbert cells shaded by average novelty</h2>
-    <svg id="map" viewBox="0 0 640 640" role="img" aria-label="Warehouse map with observations"></svg>
-    <div class="legend" id="legend"></div>
-  </section>
 
-  <section class="card">
-    <h2>Connectivity &amp; controls</h2>
-    <button id="net" class="net" type="button" aria-pressed="true"></button>
-    <div class="btns">
-      <button class="act" data-act="patrol" data-arg="10" type="button">Patrol 10 steps</button>
-      <button class="act" data-act="patrol" data-arg="50" type="button">Patrol 50 steps</button>
-      <button class="act" data-act="spill" type="button">Report oil spill (urgent)</button>
-      <button class="act" data-act="toolbox" type="button">See the red toolbox</button>
-      <button class="act" data-act="private" type="button">Private note</button>
-      <button class="act" data-path="/api/scenario/both-toolbox" data-act="both" type="button">Both robots see the toolbox</button>
-      <button class="act" data-act="blurry" type="button">Blurry toolbox view</button>
-      <button class="act" data-act="sync" type="button">Sync now</button>
+<section class="kpis" id="kpis" aria-live="polite"></section>
+
+<div id="main" hidden>
+<div class="layout">
+  <aside class="col">
+    <section class="card">
+      <h2>Fleet <span class="sub" id="fleetsub"></span></h2>
+      <div class="devlist" id="tabs" role="tablist" aria-label="Devices"></div>
+      <p class="small" style="margin:10px 2px 0">Simulator robots run inside this console so the story can be scripted. <b>Process</b> devices are separate OS processes with their own Qdrant Edge shards: <code>python -m loci.edge.node</code>.</p>
+    </section>
+
+    <section class="card" id="simctl">
+      <h2>Controls <span class="sub" id="ctlname"></span></h2>
+      <button id="net" class="net" type="button" aria-pressed="true"></button>
+      <div class="btns">
+        <button class="act" data-act="patrol" data-arg="10" type="button">Patrol 10 steps</button>
+        <button class="act" data-act="patrol" data-arg="50" type="button">Patrol 50 steps</button>
+        <button class="act" data-act="spill" type="button">Report oil spill (urgent)</button>
+        <button class="act" data-act="toolbox" type="button">See the red toolbox</button>
+        <button class="act" data-act="private" type="button">Private note</button>
+        <button class="act" data-act="blurry" type="button">Blurry toolbox view</button>
+        <button class="act" data-path="/api/scenario/both-toolbox" data-act="both" type="button">Both robots see the toolbox</button>
+        <button class="act primary" data-act="sync" type="button">Sync now</button>
+      </div>
+      <div class="lanes" id="lanes"></div>
+      <div class="small" id="lastsync"></div>
+    </section>
+
+    <section class="card" id="remotectl" hidden>
+      <h2>Device <span class="sub" id="remname"></span></h2>
+      <div id="remote"></div>
+    </section>
+  </aside>
+
+  <main class="col">
+    <section class="card">
+      <h2>Warehouse · Hilbert cells shaded by novelty <span class="sub" id="mapsub"></span></h2>
+      <div class="mapwrap"><svg id="map" class="map" viewBox="0 0 640 520" role="img" aria-label="Warehouse map"></svg></div>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <div class="row2">
+      <section class="card">
+        <h2>Ask this robot · answers only when confident</h2>
+        <form class="search" id="sform">
+          <input type="search" id="q" placeholder="oil spill · where is the toolbox · charging" aria-label="Question" autocomplete="off">
+          <button class="act primary" type="submit">Ask</button>
+        </form>
+        <div class="opts">
+          <label><input type="checkbox" id="hist"> history (superseded positions)</label>
+          <label title="Qdrant Formula: score x exp decay of age, computed on the device"><input type="checkbox" id="recent"> prefer recent (decay, 10 min half-life)</label>
+          <label title="Qdrant MMR re-ranking on the device"><input type="checkbox" id="diverse"> diverse (MMR)</label>
+        </div>
+        <div id="route"></div>
+        <div class="small" id="smeta"></div>
+        <ul class="list" id="results"></ul>
+      </section>
+      <section class="card">
+        <h2>Decisions · why each observation stayed or went</h2>
+        <ul class="list" id="feed"></ul>
+      </section>
     </div>
-    <div class="lanes" id="lanes"></div>
-    <div class="muted" id="lastsync"></div>
-    <div class="muted" style="margin-top:6px">Offline is safe: everything is stored, searchable and queued locally, and syncs when the link returns.</div>
-  </section>
 
+    <section class="card">
+      <h2>Sync diff · this robot vs the cloud</h2>
+      <div id="diffhead"></div>
+      <div class="diffgrid" id="diffgrid"></div>
+      <ul class="list" id="difflist" style="max-height:200px"></ul>
+    </section>
+  </main>
+
+  <aside class="col inspector">
+    <section class="card">
+      <h2>Qdrant Edge inspector <span class="sub" id="qsub"></span></h2>
+      <div class="feats" id="features"></div>
+    </section>
+    <section class="card">
+      <h2>Engine latency by call <span class="sub">measured, fleet-wide</span></h2>
+      <table class="t" id="lat"></table>
+    </section>
+    <section class="card">
+      <h2>Live engine calls <span class="sub">every call, as it happens</span></h2>
+      <ul class="ops" id="ops"></ul>
+    </section>
+  </aside>
+</div>
+
+<div class="bottom">
   <section class="card">
-    <h2>Decision feed &middot; why each observation stayed or went</h2>
-    <ul class="feed" id="feed"></ul>
-  </section>
-
-  <section class="card">
-    <h2>Sync diff &middot; local vs cloud</h2>
-    <div id="diffhead"></div>
-    <div class="diffgrid" id="diffgrid"></div>
-    <ul class="list" id="difflist"></ul>
-  </section>
-
-  <section class="card">
-    <h2>Ask this robot &middot; answers only when confident</h2>
-    <form class="search" id="sform">
-      <input type="search" id="q" placeholder="e.g. oil spill, where is the toolbox, charging" aria-label="Question" autocomplete="off">
-      <button class="act" type="submit">Ask</button>
-    </form>
-    <label class="chk"><input type="checkbox" id="hist"> include superseded positions (history)</label>
-    <div id="route"></div>
-    <div class="muted" id="smeta"></div>
-    <ul class="list" id="results"></ul>
-  </section>
-
-  <section class="card wide">
-    <h2>Cloud &middot; conflict inbox &amp; fleet briefings</h2>
+    <h2>Cloud · conflict inbox &amp; fleet briefings <span class="sub" id="cloudsub"></span></h2>
     <div class="row" id="cloudhead" style="margin-bottom:8px"></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
-      <div><div class="muted" style="margin-bottom:6px">Reconciler audit &amp; review inbox</div><ul class="list" id="inbox"></ul></div>
-      <div><div class="muted" style="margin-bottom:6px">Briefings pushed down to every robot</div><ul class="list" id="insights"></ul></div>
+    <div class="row2">
+      <div><div class="small" style="margin-bottom:4px">Reconciler audit &amp; human review</div><ul class="list" id="inbox"></ul></div>
+      <div><div class="small" style="margin-bottom:4px">Briefings pushed down to every robot</div><ul class="list" id="insights"></ul></div>
     </div>
   </section>
-
-  <section class="card">
-    <h2>Fleet activity</h2>
-    <ul class="list" id="events"></ul>
-  </section>
-</main>
+  <div class="col">
+    <section class="card">
+      <h2>Evidence · measured, not claimed <span class="sub">benchmarks/results</span></h2>
+      <div id="evidence"></div>
+    </section>
+    <section class="card">
+      <h2>Fleet activity</h2>
+      <ul class="list" id="events" style="max-height:240px"></ul>
+    </section>
+  </div>
+</div>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 "use strict";
 const COLORS = { SYNC_NOW: "--sync", DEDUPE: "--dedupe", SUMMARIZE_SYNC: "--summ", KEEP_LOCAL: "--local" };
 const LABEL = { SYNC_NOW: "SYNC NOW", DEDUPE: "DEDUPE", SUMMARIZE_SYNC: "SUMMARIZE", KEEP_LOCAL: "KEEP LOCAL" };
-let robot = null, robots = [], busy = false;
 const ROUTE = { ANSWER_LOCAL: "ANSWERED LOCALLY", ESCALATE_CLOUD: "ESCALATED TO CLOUD", LOW_CONFIDENCE_OFFLINE: "LOW CONFIDENCE (OFFLINE)", ABSTAIN: "ABSTAINED" };
-
+const FEATURES = [
+  ["dense_hnsw", "Dense vectors · HNSW"], ["sparse_bm25", "Sparse · built-in BM25"],
+  ["payload_filter", "Payload-index filters"], ["decay_formula", "Formula · time decay"],
+  ["mmr", "MMR diversity"], ["facets", "Facet counts"],
+  ["upsert", "Upserts (WAL-durable)"], ["payload_update", "Payload updates"],
+  ["scroll", "Scroll (sync diffs)"], ["retrieve", "Retrieve by id"],
+];
+let robot = null;        // in-process robot driving the centre panels
+let selected = null;     // selected fleet card (may be a process device)
+let busy = false, lastEvidence = 0;
 const $ = (id) => document.getElementById(id);
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null) continue;
     if (k === "class") el.className = v; else if (k === "text") el.textContent = v; else el.setAttribute(k, v);
   }
   for (const k of kids.flat()) if (k != null) el.append(k.nodeType ? k : document.createTextNode(String(k)));
@@ -199,9 +327,10 @@ function svg(tag, attrs, title) {
   if (title) el.append(Object.assign(document.createElementNS("http://www.w3.org/2000/svg", "title"), { textContent: title }));
   return el;
 }
-const bytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+const bytes = (n) => n == null ? "–" : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+const num = (n) => n == null ? "–" : Number(n).toLocaleString();
 const ago = (ms) => { const s = Math.max(0, Math.round((Date.now() - ms) / 1000)); return s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`; };
-function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600); }
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2800); }
 async function api(path, opts) {
   const r = await fetch(path, opts && { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts.body || {}) });
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -212,117 +341,192 @@ function badge(action, reason) {
   return h("span", { class: `badge b-${priv ? "PRIVATE" : action}`, text: priv ? "PRIVATE" : LABEL[action] || action });
 }
 
-function renderTabs(state) {
-  const tabs = $("tabs");
+/* ---------------- header ---------------- */
+function renderChips(ov, q) {
+  const c = [
+    h("span", { class: "chip ok" }, h("i"), "engine ", h("b", { text: q.engine.edge })),
+    h("span", { class: "chip" }, "cloud ", h("b", { text: ov.cloud_kind.split(" (")[0] })),
+    ov.embedder_real
+      ? h("span", { class: "chip ok" }, "embedder ", h("b", { text: ov.embedder }))
+      : h("span", { class: "chip warn", title: "Set LOCI_EMBEDDER=fastembed for real semantic search" }, "embedder: hashed stand-in (not semantic)"),
+  ];
+  $("chips").replaceChildren(...c);
+}
+function renderKpis(ov) {
+  const b = ov.bytes;
+  const tiles = [
+    ["Devices online", `${ov.devices_online} / ${ov.devices_total}`, "simulators + processes"],
+    ["Memories on devices", num(ov.memories_on_devices), "local + fleet mirror shards"],
+    ["Memories in cloud", ov.cloud_memories < 0 ? "–" : num(ov.cloud_memories), ov.cloud_kind.split(" (")[0]],
+    ["Bandwidth saved", b.saved_pct == null ? "–" : `${b.saved_pct}%`, `${bytes(b.sent_total)} sent vs ${bytes(b.naive_bytes)} naive (est.)`],
+    ["Qdrant calls / s", ov.qdrant_calls_per_s, `${num(ov.qdrant_calls_total)} total, fleet-wide`],
+    ["Search p95", ov.search_p95_ms == null ? "–" : `${ov.search_p95_ms} ms`, "last 200 on-device queries"],
+  ];
+  $("kpis").replaceChildren(...tiles.map(([k, v, s]) => h("div", { class: "kpi" }, h("span", { text: k }), h("b", { text: v }), h("small", { text: s }))));
+}
+
+/* ---------------- fleet ---------------- */
+function renderFleet(state, devices) {
   if (!robot) robot = state.robots[0].name;
-  tabs.replaceChildren(...state.robots.map((r) => {
-    const b = h("button", { class: "tab", role: "tab", "aria-selected": String(r.name === robot), type: "button" },
-      h("span", { class: "dot" + (r.online ? " on" : "") }), r.name,
-      h("span", { class: "muted", text: `${r.local} local · ${r.mirror} mirror` }));
-    b.onclick = () => { robot = r.name; refresh(); };
+  if (!selected) selected = robot;
+  const cards = state.robots.map((r) => {
+    const b = h("button", { class: "dev", role: "tab", type: "button", "aria-selected": String(selected === r.name) },
+      h("span", { class: "dot" + (r.online ? " on" : "") }), h("b", { text: r.name }),
+      h("span", { class: "n", text: `${r.local} local · ${r.mirror} mirror` }),
+      h("span", { class: "kind" }, h("span", { class: "tag", text: "SIMULATOR" }), ` in-process · ${r.online ? "online" : "offline"}`));
+    b.onclick = () => { selected = r.name; robot = r.name; refresh(); };
     return b;
-  }));
+  });
+  for (const d of devices) {
+    const fp = d.footprint || {};
+    const b = h("button", { class: "dev", role: "tab", type: "button", "aria-selected": String(selected === d.name) },
+      h("span", { class: "dot" + (d.online ? " on" : "") }), h("b", { text: d.name }),
+      h("span", { class: "n", text: `${num(fp.points_local)} local · ${num(fp.points_mirror)} mirror` }),
+      h("span", { class: "kind" }, h("span", { class: "tag proc", text: "PROCESS" }), ` pid ${d.pid} · ${d.online ? `${d.rss_mb} MB RSS` : `silent ${d.last_seen_s}s`}`));
+    b.onclick = () => { selected = d.name; refresh(); };
+    cards.push(b);
+  }
+  $("tabs").replaceChildren(...cards);
+  $("fleetsub").textContent = `${state.robots.length} simulators · ${devices.length} processes`;
+  const remote = devices.find((d) => d.name === selected);
+  $("simctl").hidden = !!remote; $("remotectl").hidden = !remote;
+  if (remote) renderRemote(remote);
+}
+function meter(label, value, max, text) {
+  const pct = max ? Math.min(100, (100 * value) / max) : 0;
+  return h("div", { class: "meter" }, h("span", { text: label }), h("div", { class: "track" }, h("i", { style: `width:${pct}%` })), h("b", { text }));
+}
+function renderRemote(d) {
+  $("remname").textContent = d.online ? "online" : `no heartbeat for ${d.last_seen_s}s`;
+  const fp = d.footprint || {}, ob = d.outbox || {}, dec = d.decisions || {};
+  const cmd = (body, msg) => async () => { try { await api(`/api/devices/${d.name}/command`, { body }); toast(msg); } catch (e) { toast("Error: " + e.message); } };
+  const out = h("button", { class: "act", type: "button", text: "Drop uplink 20 s" }); out.onclick = cmd({ outage_s: 20 }, `${d.name}: uplink will drop for 20 s`);
+  const spill = h("button", { class: "act", type: "button", text: "Report spill" }); spill.onclick = cmd({ event: "spill" }, `${d.name}: spill queued`);
+  const tb = h("button", { class: "act", type: "button", text: "See toolbox" }); tb.onclick = cmd({ event: "toolbox" }, `${d.name}: toolbox sighting queued`);
+  const top = (d.qdrant_ops || []).slice(0, 4);
+  $("remote").replaceChildren(
+    h("div", { class: "kv" },
+      h("span", { text: "process" }), h("b", { class: "mono", text: `pid ${d.pid} · restarts ${d.restarts}` }),
+      h("span", { text: "host" }), h("span", { class: "mono", text: `${d.host} · ${d.platform}` }),
+      h("span", { text: "uplink" }), h("b", { text: d.online ? d.uplink : "unreachable (no heartbeat)" }),
+      h("span", { text: "embedder" }), h("span", { class: "mono", text: d.embedder })),
+    h("div", { style: "margin:10px 0" },
+      meter("RAM (RSS)", d.rss_mb, 512, `${d.rss_mb} MB`),
+      meter("CPU", d.cpu_pct, 100, `${d.cpu_pct}%`),
+      meter("Disk", (fp.disk_local_bytes || 0) + (fp.disk_mirror_bytes || 0), 64 * 1048576, bytes((fp.disk_local_bytes || 0) + (fp.disk_mirror_bytes || 0))),
+      meter("Queue", Object.values(ob).reduce((a, b) => a + b, 0), 50, `${Object.values(ob).reduce((a, b) => a + b, 0)} waiting`)),
+    h("div", { class: "lanes" }, ...Object.entries(dec).filter(([, v]) => v).map(([k, v]) => h("span", { class: "pill", text: `${v} ${LABEL[k] || k}` }))),
+    h("div", { class: "small", style: "margin:6px 0 4px" }, `Qdrant Edge on this device: ${num(d.qdrant_calls)} calls`),
+    h("table", { class: "t" }, h("tr", {}, h("th", { text: "call" }), h("th", { class: "num", text: "p50" }), h("th", { class: "num", text: "p95" })),
+      ...top.map((s) => h("tr", {}, h("td", { class: "mono", text: s.kind }), h("td", { class: "num", text: `${s.p50_ms} ms` }), h("td", { class: "num", text: `${s.p95_ms} ms` })))),
+    h("div", { class: "btns", style: "margin-top:10px" }, out, spill, tb),
+    h("div", { class: "small", style: "margin-top:8px" }, "Commands ride the next heartbeat. During an outage the device keeps patrolling and deciding; heartbeats stop; it syncs its backlog when the uplink returns. Kill it (even kill -9) and restart: nothing is lost."));
 }
 
-function renderHeader(s) {
-  $("s-cloud").textContent = s.cloud_memories;
-  $("s-sent").textContent = bytes(s.bytes.sent_total);
-  $("s-naive").textContent = bytes(s.bytes.naive_bytes);
-  $("s-saved").textContent = s.bytes.saved_pct == null ? "–" : `${s.bytes.saved_pct}%`;
-}
-
+/* ---------------- sim controls ---------------- */
 function renderControls(s) {
   const r = s.robots.find((x) => x.name === robot);
+  $("ctlname").textContent = `${robot} · simulator`;
   const net = $("net");
   net.className = "net " + (r.online ? "on" : "off");
-  net.textContent = r.online ? "● ONLINE — click to cut the network" : "○ OFFLINE — click to restore the network";
+  net.textContent = r.online ? "● ONLINE: click to cut the network" : "○ OFFLINE: click to restore the network";
   net.setAttribute("aria-pressed", String(r.online));
   net.onclick = async () => { await api(`/api/robots/${robot}/link`, { body: { up: !r.online } }); toast(r.online ? `${robot}: network cut` : `${robot}: network restored`); refresh(); };
-  const lanes = $("lanes");
-  lanes.replaceChildren(
-    h("span", { class: "chip", text: `queued raw: ${r.outbox.SYNC_NOW || 0}` }),
-    h("span", { class: "chip", text: `queued for summary: ${r.outbox.SUMMARIZE_SYNC || 0}` }),
-    h("span", { class: "chip", text: `digest ${r.digest}` }));
+  $("lanes").replaceChildren(
+    h("span", { class: "pill", text: `queued raw ${r.outbox.SYNC_NOW || 0}` }),
+    h("span", { class: "pill", text: `queued for summary ${r.outbox.SUMMARIZE_SYNC || 0}` }),
+    h("span", { class: "pill mono", text: `digest ${r.digest}` }));
   const ls = r.last_sync || {};
-  $("lastsync").textContent = ls.ts_ms
-    ? `Last sync ${ago(ls.ts_ms)}: ${ls.link_down ? "offline, nothing lost" : `sent ${ls.sent} raw, ${ls.summarized} summarized, pulled ${ls.pulled}`}`
-    : "No sync yet.";
-  const ev = $("events");
-  ev.replaceChildren(...s.events.map((e) => h("li", {}, h("span", { class: "mono", text: ago(e.ts_ms) + " " }), h("b", { text: e.robot + " " }), e.msg)));
-  if (!s.events.length) ev.append(h("li", { class: "muted", text: "Nothing yet — try a patrol." }));
+  $("lastsync").textContent = ls.ts_ms ? `Last sync ${ago(ls.ts_ms)}: ${ls.link_down ? "offline, nothing lost" : `sent ${ls.sent} raw, ${ls.summarized} summarized, pulled ${ls.pulled}`}` : "No sync yet.";
+  $("events").replaceChildren(...s.events.map((e) => h("li", {}, h("span", { class: "small mono", text: ago(e.ts_ms) + "  " }), h("b", { text: e.robot + " " }), e.msg)));
+  if (!s.events.length) $("events").append(h("li", { class: "muted", text: "Nothing yet: try a patrol." }));
 }
 
 function renderFeed(decisions) {
   const feed = $("feed");
   feed.replaceChildren(...decisions.map((d) => h("li", {},
-    h("div", { class: "row" }, badge(d.action, d.reason), h("b", { text: d.key }), h("span", { class: "mono", text: ago(d.ts_ms) })),
+    h("div", { class: "row" }, badge(d.action, d.reason), h("b", { text: d.key.replace(/-\d{10,}$/, "") }), h("span", { class: "small", text: ago(d.ts_ms) })),
     h("div", { class: "reason", text: d.reason }),
-    d.best_similarity != null ? h("div", { class: "mono", text: `similarity ${d.best_similarity} · novelty ${d.novelty} · nearest from ${d.neighbor_source}` }) : null,
+    d.best_similarity != null ? h("div", { class: "small mono", text: `sim ${d.best_similarity} · novelty ${d.novelty} · nearest in ${d.neighbor_source}` }) : null,
     h("div", { class: "bar", title: `novelty ${d.novelty}` }, h("i", { style: `width:${Math.round(d.novelty * 100)}%` })))));
-  if (!decisions.length) feed.append(h("li", { class: "muted", text: "No observations yet — press “Patrol 10 steps”." }));
+  if (!decisions.length) feed.append(h("li", { class: "muted", text: "No observations yet: press “Patrol 10 steps”." }));
 }
 
 function renderDiff(d) {
-  const head = $("diffhead");
   const verdict = !d.cloud_reachable ? ["off", "cloud unreachable (offline)"] : d.converged ? ["ok", "converged with the cloud"] : ["no", "changes pending"];
-  head.replaceChildren(h("span", { class: `verdict ${verdict[0]}`, text: verdict[1] }),
-    h("span", { class: "mono", text: `  local digest ${d.local_digest}` }));
+  $("diffhead").replaceChildren(h("span", { class: `verdict ${verdict[0]}`, text: verdict[1] }), h("span", { class: "small mono", text: `  local digest ${d.local_digest}` }));
   const c = d.counts;
-  $("diffgrid").replaceChildren(...[["to push", c.to_push], ["to pull", c.to_pull], ["in sync", c.in_sync],
-    ["held local", c.held_local], ["await summary", c.awaiting_summary], ["reconcile", c.reconcile]]
+  $("diffgrid").replaceChildren(...[["to push", c.to_push], ["to pull", c.to_pull], ["in sync", c.in_sync], ["held local", c.held_local], ["await summary", c.awaiting_summary], ["reconcile", c.reconcile]]
     .map(([k, v]) => h("div", {}, h("b", { text: v }), h("span", { text: k }))));
-  const list = $("difflist");
   const rows = [];
-  d.to_push.slice(0, 6).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-SYNC_NOW", text: "PUSH" }), " ", i.text || i.id)));
-  d.to_pull.slice(0, 4).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-mirror", text: "PULL" }), " ", i.id)));
-  d.held_local.slice(0, 6).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-KEEP_LOCAL", text: "HELD" }), " ", i.text || i.id, h("div", { class: "reason", text: i.why }))));
-  d.reconcile.slice(0, 4).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-SUMMARIZE_SYNC", text: "RECONCILE" }), " ", i.text || i.id)));
-  list.replaceChildren(...rows);
-  if (!rows.length) list.append(h("li", { class: "muted", text: "Nothing to reconcile." }));
+  d.to_push.slice(0, 5).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-SYNC_NOW", text: "PUSH" }), " ", i.text || i.id)));
+  d.to_pull.slice(0, 3).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-mirror", text: "PULL" }), " ", h("span", { class: "mono small", text: i.id }))));
+  d.held_local.slice(0, 5).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-KEEP_LOCAL", text: "HELD" }), " ", i.text || i.id, h("span", { class: "reason", text: `  ${i.why}` }))));
+  d.reconcile.slice(0, 3).forEach((i) => rows.push(h("li", {}, h("span", { class: "badge b-SUMMARIZE_SYNC", text: "RECONCILE" }), " ", i.text || i.id)));
+  $("difflist").replaceChildren(...rows);
+  if (!rows.length) $("difflist").append(h("li", { class: "muted", text: "Nothing to reconcile." }));
 }
 
+/* ---------------- map ---------------- */
 function renderMap(m) {
-  const S = 640, cs = S / m.grid, el = $("map");
-  const kids = [];
-  const maxN = Math.max(1, ...m.cells.map((c) => c.count));
+  const W = 640, H = 520, cw = W / m.grid, chh = H / m.grid, el = $("map"), kids = [];
   for (let i = 0; i <= m.grid; i++) {
-    kids.push(svg("line", { x1: i * cs, y1: 0, x2: i * cs, y2: S, stroke: css("--line"), "stroke-width": 0.5 }));
-    kids.push(svg("line", { x1: 0, y1: i * cs, x2: S, y2: i * cs, stroke: css("--line"), "stroke-width": 0.5 }));
+    kids.push(svg("line", { x1: i * cw, y1: 0, x2: i * cw, y2: H, stroke: css("--line"), "stroke-width": 0.6 }));
+    kids.push(svg("line", { x1: 0, y1: i * chh, x2: W, y2: i * chh, stroke: css("--line"), "stroke-width": 0.6 }));
   }
-  m.cells.forEach((c) => kids.push(svg("rect", { x: c.ix * cs, y: c.iy * cs, width: cs, height: cs, fill: css("--summ"),
-    opacity: (0.1 + 0.6 * c.novelty).toFixed(2) },
+  m.cells.forEach((c) => kids.push(svg("rect", { x: c.ix * cw + 1, y: c.iy * chh + 1, width: cw - 2, height: chh - 2, rx: 3, fill: css("--summ"), opacity: (0.08 + 0.5 * c.novelty).toFixed(2) },
     `Hilbert cell #${c.hilbert} · ${c.count} observations · mean novelty ${c.novelty}`)));
   m.landmarks.forEach((l) => {
-    const x = l.x * S, y = l.y * S;
-    kids.push(svg("path", { d: `M${x} ${y - 9} L${x + 9} ${y} L${x} ${y + 9} L${x - 9} ${y} Z`, fill: "none", stroke: css("--text"), "stroke-width": 1.5 }, l.text));
-    const t = svg("text", { x: x + 12, y: y - 10, fill: css("--muted"), "font-size": 12 }); t.textContent = l.name; kids.push(t);
+    const x = l.x * W, y = l.y * H;
+    kids.push(svg("path", { d: `M${x} ${y - 9} L${x + 9} ${y} L${x} ${y + 9} L${x - 9} ${y} Z`, fill: "none", stroke: css("--text"), "stroke-width": 1.5, opacity: 0.8 }, l.text));
+    const t = svg("text", { x: x + 12, y: y - 9, fill: css("--muted"), "font-size": 12 }); t.textContent = l.name; kids.push(t);
   });
-  m.mirror.forEach((p) => kids.push(svg("circle", { cx: p.x * S, cy: p.y * S, r: 7, fill: "none", stroke: css("--accent"), "stroke-width": 2, "stroke-dasharray": "3 2" },
-    `from fleet mirror (${p.device}): ${p.text}`)));
-  m.points.forEach((p) => kids.push(svg("circle", { cx: p.x * S, cy: p.y * S, r: 3.2, fill: css(COLORS[p.action] || "--text"), opacity: 0.85 }, `${p.action} · novelty ${p.novelty}`)));
+  m.mirror.forEach((p) => kids.push(svg("circle", { cx: p.x * W, cy: p.y * H, r: 7, fill: "none", stroke: css("--accent"), "stroke-width": 1.8, "stroke-dasharray": "3 2" }, `from the fleet mirror (${p.device}): ${p.text}`)));
+  m.points.forEach((p) => kids.push(svg("circle", { cx: p.x * W, cy: p.y * H, r: 3.4, fill: css(COLORS[p.action] || "--text"), stroke: css("--panel2"), "stroke-width": 1 }, `${p.action} · novelty ${p.novelty}`)));
+  (m.devices || []).forEach((d) => {
+    const x = d.x * W, y = d.y * H, col = d.online ? (d.remote ? css("--accent2") : css("--accent")) : css("--bad");
+    if (d.online) kids.push(svg("circle", { cx: x, cy: y, r: 9, fill: "none", stroke: col, "stroke-width": 2, class: "pulse" }));
+    kids.push(svg("circle", { cx: x, cy: y, r: 7, fill: col, stroke: css("--panel2"), "stroke-width": 2 }, `${d.name} (${d.remote ? "process" : "simulator"}, ${d.online ? "online" : "offline"})`));
+    const t = svg("text", { x: x - 11, y: y + 20, fill: css("--text"), "font-size": 12, "font-weight": 700, "text-anchor": "end" }); t.textContent = d.name; kids.push(t);
+  });
   el.replaceChildren(...kids);
-  const leg = $("legend");
-  leg.replaceChildren(...Object.entries(LABEL).map(([k, v]) => h("span", {}, h("i", { style: `background:${css(COLORS[k])}` }), v)),
-    h("span", {}, "◇ landmark"), h("span", {}, "◌ from fleet mirror"), h("span", {}, "shading = mean novelty of the cell"));
+  $("mapsub").textContent = `${robot}'s decisions · ${m.points.length} observations`;
+  $("legend").replaceChildren(...Object.entries(LABEL).map(([k, v]) => h("span", {}, h("i", { style: `background:${css(COLORS[k])}` }), v)),
+    h("span", {}, h("i", { style: `background:${css("--accent")}` }), "simulator"), h("span", {}, h("i", { style: `background:${css("--accent2")}` }), "process device"),
+    h("span", {}, "◇ landmark · ◌ fleet mirror · shading = novelty"));
 }
 
+/* ---------------- inspector ---------------- */
+function renderInspector(q) {
+  $("qsub").textContent = `${num(q.total_calls)} calls · ${q.engine.client}`;
+  const f = q.features || {};
+  $("features").replaceChildren(...FEATURES.map(([k, label]) => h("div", { class: "feat" + (f[k] ? " on" : "") }, h("b", { text: num(f[k] || 0) }), label)));
+  const stats = q.stats.slice(0, 9);
+  const maxp = Math.max(0.001, ...stats.map((s) => s.p95_ms));
+  $("lat").replaceChildren(h("tr", {}, h("th", { text: "call kind" }), h("th", { class: "num", text: "calls" }), h("th", { class: "num", text: "p50 ms" }), h("th", { class: "num", text: "p95 ms" })),
+    ...stats.map((s) => h("tr", {}, h("td", { class: "mono", text: s.kind.replace("query:", "query · ") }), h("td", { class: "num", text: num(s.calls) }), h("td", { class: "num", text: `${s.p50_ms}` }),
+      h("td", { class: "num" }, h("span", { text: `${s.p95_ms}` }), h("div", { class: "bar" }, h("i", { style: `width:${Math.round(100 * s.p95_ms / maxp)}%;background:${css("--accent")}` }))))));
+  $("ops").replaceChildren(...q.recent.slice(0, 40).map((o) => h("li", {},
+    h("span", { class: "mono small", text: o.device }), h("span", { class: `mono op op-${o.op}`, text: o.op }),
+    h("span", { class: "mono small", text: `${o.shard}${o.detail ? " · " + o.detail : ""}${o.n ? " → " + o.n : ""}` }),
+    h("span", { class: "mono small", style: "text-align:right", text: o.us < 1000 ? `${o.us} µs` : `${(o.us / 1000).toFixed(1)} ms` }))));
+}
+
+/* ---------------- cloud ---------------- */
 function renderCloud(c) {
-  const head = $("cloudhead");
   const roles = Object.entries(c.roles).map(([k, v]) => `${v} ${k}`).join(" · ");
-  head.replaceChildren(
-    h("span", { class: "chip", text: c.llm.enabled ? `LLM briefings: ${c.llm.provider} / ${c.llm.model}` : "LLM off — deterministic briefings (set GROQ_API_KEY, CEREBRAS_API_KEY or GEMINI_API_KEY)" }),
-    h("span", { class: "chip", text: `cloud: ${c.cloud_kind}` }),
-    h("span", { class: "chip", text: `cloud memories: ${roles || "none"}` }),
-    h("span", { class: "chip", text: `pending review: ${c.conflict_counts.pending_review || 0}` }));
-  const inbox = $("inbox");
-  inbox.replaceChildren(...c.conflicts.map((x) => {
+  $("cloudsub").textContent = c.cloud_kind;
+  $("cloudhead").replaceChildren(
+    h("span", { class: "pill", text: c.llm.enabled ? `LLM briefings: ${c.llm.provider} / ${c.llm.model}` : "LLM off: rule-based briefings (set GROQ_API_KEY, CEREBRAS_API_KEY or GEMINI_API_KEY)" }),
+    h("span", { class: "pill", text: `cloud memories: ${roles || "none"}` }),
+    h("span", { class: "pill", text: `pending review: ${c.conflict_counts.pending_review || 0}` }));
+  $("inbox").replaceChildren(...c.conflicts.map((x) => {
     const e = x.evidence, pending = x.status === "pending_review";
     const label = pending ? "REVIEW" : x.status === "approved" ? "APPROVED" : x.status === "rejected" ? "REJECTED" : x.rule === "moved" ? "MOVED" : "MERGED";
     const li = h("li", {},
-      h("div", { class: "row" }, h("span", { class: `badge b-${label}`, text: label }), h("b", { text: (e.a && e.a.text) || x.rule }),
-        h("span", { class: "mono", text: `${ago(x.ts_ms)}` })),
+      h("div", { class: "row" }, h("span", { class: `badge b-${label}`, text: label }), h("b", { text: (e.a && e.a.text) || x.rule }), h("span", { class: "small", text: ago(x.ts_ms) })),
       h("div", { class: "reason", text: e.rule || "similar, but not similar enough to merge automatically: needs a human decision" }),
-      h("div", { class: "mono", text: `similarity ${e.similarity} · ${e.a.device} vs ${e.b.device} · apart ${e.displacement} · ${Math.round(e.dt_ms / 1000)}s apart` }));
+      h("div", { class: "small mono", text: `sim ${e.similarity} · ${e.a.device} vs ${e.b.device} · ${e.displacement} apart · ${Math.round(e.dt_ms / 1000)}s apart` }));
     if (pending) {
       const go = (ap) => async () => { try { await api(`/api/conflicts/${x.id}/resolve`, { body: { approve: ap } }); toast(ap ? "Merged: same object" : "Kept separate"); } catch (er) { toast("Error: " + er.message); } refresh(); };
       const yes = h("button", { class: "mini", type: "button", text: "Same object: merge" }); yes.onclick = go(true);
@@ -331,24 +535,47 @@ function renderCloud(c) {
     }
     return li;
   }));
-  if (!c.conflicts.length) inbox.append(h("li", { class: "muted", text: "No conflicts yet. Cut both networks, press “Both robots see the toolbox”, restore, sync." }));
-  const ins = $("insights");
-  ins.replaceChildren(...c.insights.map((i) => h("li", {},
-    h("div", { class: "row" }, h("span", { class: "badge b-cloud", text: i.generator === "deterministic" ? "RULE-BASED" : String(i.generator).toUpperCase() }), h("span", { class: "mono", text: `v${i.version} · ${ago(i.timestamp_ms)}` })),
+  if (!c.conflicts.length) $("inbox").append(h("li", { class: "muted", text: "No conflicts yet. Cut both networks, “Both robots see the toolbox”, restore, sync." }));
+  $("insights").replaceChildren(...c.insights.map((i) => h("li", {},
+    h("div", { class: "row" }, h("span", { class: "badge b-cloud", text: i.generator === "deterministic" ? "RULE-BASED" : String(i.generator).toUpperCase() }), h("span", { class: "small", text: `v${i.version} · ${ago(i.timestamp_ms)}` })),
     h("div", { text: i.text }))));
-  if (!c.insights.length) ins.append(h("li", { class: "muted", text: "Briefings appear after robots sync." }));
+  if (!c.insights.length) $("insights").append(h("li", { class: "muted", text: "Briefings appear after robots sync." }));
 }
 
+/* ---------------- evidence ---------------- */
+function renderEvidence(ev) {
+  const box = $("evidence");
+  if (!ev.available) { box.replaceChildren(h("div", { class: "muted", text: "No results yet: run make verify and python benchmarks/edge_real_eval.py." })); return; }
+  const kids = [];
+  if (ev.real) {
+    const r = ev.real;
+    kids.push(h("div", { class: "row", style: "margin-bottom:6px" }, h("span", { class: "prov real", text: "REAL DATA" }), h("span", { class: "small", text: `${num(r.queries)} paraphrase queries among ${num(r.corpus)} sentences · ${r.embedder}` })));
+    kids.push(h("table", { class: "t" }, h("tr", {}, h("th", { text: "Qdrant Edge retrieval" }), h("th", { class: "num", text: "R@1" }), h("th", { class: "num", text: "R@10" }), h("th", { class: "num", text: "p95" })),
+      ...Object.entries(r.retrieval).map(([m, v]) => h("tr", {}, h("td", { text: m }), h("td", { class: "num", text: v["recall@1"] }), h("td", { class: "num", text: v["recall@10"] }), h("td", { class: "num", text: `${v.p95_ms} ms` })))));
+    kids.push(h("div", { class: "small", style: "margin:6px 0 12px" },
+      `Answer gate on real queries: ROC-AUC ${r.gate.auroc_answerable_vs_not}; answers ${r.gate.answered_when_answerable_pct}% of answerable vs ${r.gate.answered_when_unanswerable_pct}% of unanswerable. `,
+      `Dedupe vs human judges (MSRP): false merges at 0.95 = ${r.dedupe.at_dedupe_threshold.false_merge_rate_pct}%.`,
+      r.embedder_real ? "" : " Dense numbers use the hashed stand-in: run with a real model for semantic results."));
+  }
+  if (ev.verify) {
+    const pass = ev.verify.checks.filter((c) => c.ok).length;
+    kids.push(h("div", { class: "row", style: "margin-bottom:6px" }, h("span", { class: "prov syn", text: "SYNTHETIC STRESS TEST" }), h("span", { class: "small", text: `make verify · ${pass}/${ev.verify.checks.length} checks pass` })));
+    kids.push(h("div", { class: "checks" }, ...ev.verify.checks.map((c) => h("div", {}, h("span", { class: `badge b-${c.ok ? "PASS" : "FAIL"}`, text: c.ok ? "PASS" : "FAIL" }), h("span", { text: c.name }), h("span", { class: "small", text: c.detail })))));
+  }
+  box.replaceChildren(...kids);
+}
+
+/* ---------------- loop ---------------- */
 async function refresh() {
   if (busy) return; busy = true;
   try {
-    const state = await api("/api/state");
+    const [state, ov, q, devices] = await Promise.all([api("/api/state"), api("/api/overview"), api("/api/qdrant"), api("/api/devices")]);
     if (!state.robots.length) return;
     $("main").hidden = false;
-    renderTabs(state); renderHeader(state); renderControls(state);
-    const dash = await api(`/api/robots/${robot}/dashboard`);
-    renderFeed(dash.decisions); renderDiff(dash.diff); renderMap(dash.map);
-    renderCloud(await api("/api/cloud"));
+    renderChips(ov, q); renderKpis(ov); renderFleet(state, devices); renderControls(state); renderInspector(q);
+    const [dash, cloud] = await Promise.all([api(`/api/robots/${robot}/dashboard`), api("/api/cloud")]);
+    renderFeed(dash.decisions); renderDiff(dash.diff); renderMap(dash.map); renderCloud(cloud);
+    if (Date.now() - lastEvidence > 30000) { lastEvidence = Date.now(); renderEvidence(await api("/api/evidence")); }
   } catch (e) { toast("Error: " + e.message); } finally { busy = false; }
 }
 
@@ -360,8 +587,8 @@ document.querySelectorAll("button.act[data-act]").forEach((b) => {
       const r = await api(b.dataset.path || `/api/robots/${robot}/${act}`, { body });
       if (act === "patrol") toast(`${robot}: ${r.steps} steps → ` + Object.entries(r.decisions).map(([k, v]) => `${v} ${LABEL[k]}`).join(", "));
       else if (act === "sync") toast(r.link_down ? `${robot} is offline: queued safely` : `${robot}: sent ${r.sent}, summarized ${r.summarized}, pulled ${r.pulled}`);
-      else if (act === "both") toast("Both robots reported the toolbox — sync to let the cloud reconcile");
-      else toast(`${robot}: ${LABEL[r.action]} — ${r.reason}`);
+      else if (act === "both") toast("Both robots reported the toolbox: sync to let the cloud reconcile");
+      else toast(`${robot}: ${LABEL[r.action]}: ${r.reason}`);
     } catch (e) { toast("Error: " + e.message); }
     refresh();
   };
@@ -370,19 +597,22 @@ document.querySelectorAll("button.act[data-act]").forEach((b) => {
 $("sform").onsubmit = async (ev) => {
   ev.preventDefault();
   const q = $("q").value.trim(); if (!q) return;
+  const params = new URLSearchParams({ q, history: $("hist").checked });
+  if ($("recent").checked) params.set("recent_half_life_s", "600");
+  if ($("diverse").checked) params.set("diverse", "true");
   try {
-    const r = await api(`/api/robots/${robot}/ask?q=${encodeURIComponent(q)}&history=${$("hist").checked}`);
-    const pct = Math.round(r.confidence * 100), c = r.components;
+    const r = await api(`/api/robots/${robot}/ask?${params}`);
+    const pct = Math.round(r.confidence * 100), c = r.components, th = Math.round(r.thresholds.answer_threshold * 100);
     $("route").replaceChildren(
-      h("div", { class: "row" }, h("span", { class: `badge b-${r.route}`, text: ROUTE[r.route] }), h("b", { text: `confidence ${pct}%` }), h("span", { class: "mono", text: `threshold ${Math.round(r.thresholds.answer_threshold * 100)}%` })),
-      h("div", { class: "conf" }, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
-      h("div", { class: "mono", text: `similarity ${c.similarity} · wording ${c.lexical} · margin ${c.margin} · staleness −${c.stale}` }),
-      h("div", { class: "reason", text: r.reason + (r.cached ? ` · cached ${r.cached} memor${r.cached === 1 ? "y" : "ies"} to this robot's mirror` : "") }));
-    $("smeta").textContent = `${r.latency_ms} ms · ${r.online ? "online" : "OFFLINE — answered entirely from this device"}`;
+      h("div", { class: "row" }, h("span", { class: `badge b-${r.route}`, text: ROUTE[r.route] }), h("b", { text: `confidence ${pct}%` }), h("span", { class: "small", text: `answer threshold ${th}%` })),
+      h("div", { class: "conf" }, h("i", { style: `width:${pct}%;background:${css(pct >= th ? "--sync" : "--summ")}` }), h("s", { style: `left:${th}%` })),
+      h("div", { class: "small mono", text: `similarity ${c.similarity} · wording ${c.lexical} · margin ${c.margin} · staleness −${c.stale}` }),
+      h("div", { class: "reason", text: r.reason + (r.cached ? ` · cached ${r.cached} memor${r.cached === 1 ? "y" : "ies"} into this robot's mirror` : "") }));
+    $("smeta").textContent = `${r.latency_ms} ms · ${r.online ? "online" : "OFFLINE: answered entirely on this device"}`;
     $("results").replaceChildren(...r.hits.map((x) => h("li", {},
       h("div", { class: "row" }, h("span", { class: `badge b-${x.source}`, text: x.source.toUpperCase() }), x.role ? h("span", { class: "badge b-KEEP_LOCAL", text: x.role }) : null,
-        h("b", { text: x.text || "(summary)" }), h("span", { class: "mono", text: `score ${x.score}` })),
-      h("div", { class: "mono", text: `${x.device_id} · v${x.version} · ${x.sync_state || ""} · #${x.content_hash} · (${(+x.x).toFixed(2)}, ${(+x.y).toFixed(2)})${x.generator ? " · " + x.generator : ""}` }))));
+        h("b", { text: x.text || "(summary)" }), h("span", { class: "small mono", text: `score ${x.score}` })),
+      h("div", { class: "small mono", text: `${x.device_id} · v${x.version} · ${x.sync_state || ""} · #${x.content_hash} · (${(+x.x).toFixed(2)}, ${(+x.y).toFixed(2)})${x.generator ? " · " + x.generator : ""}` }))));
     if (!r.hits.length) $("results").append(h("li", { class: "muted", text: "No answer given: nothing relevant is known with enough confidence." }));
   } catch (e) { toast("Error: " + e.message); }
 };
@@ -394,8 +624,7 @@ $("theme").onclick = () => {
   refresh();
 };
 try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) { /* ignore */ }
-
-refresh(); setInterval(refresh, 1200);
+refresh(); setInterval(refresh, 1500);
 </script>
 </body>
 </html>
