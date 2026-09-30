@@ -123,6 +123,7 @@ loci-core = { path = "loci-core", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: multi-process end-to-end tests (about 30 s)"]
 
 [tool.ruff]
 target-version = "py311"

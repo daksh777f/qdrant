@@ -47,7 +47,7 @@ class _Base:
     real = False
 
     def embed(self, text: str) -> np.ndarray:
-        return self.embed_many([text])[0]
+        return cast("np.ndarray", self.embed_many([text])[0])
 
     def embed_many(self, texts: list[str]) -> np.ndarray:
         return np.stack([self.embed(t) for t in texts])
@@ -97,7 +97,7 @@ class FastEmbedEmbedder(_Base):
 
     def embed_many(self, texts: list[str]) -> np.ndarray:
         vecs = np.asarray(list(self._model.embed(texts)), dtype=np.float32)
-        return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+        return cast("np.ndarray", vecs / np.linalg.norm(vecs, axis=1, keepdims=True))
 
 
 class OnnxEmbedder(_Base):

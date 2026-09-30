@@ -9,6 +9,7 @@ The Edge shards, sync policy, outbox, sync and diff are the real engine.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import tempfile
 import threading
@@ -28,6 +29,7 @@ from loci.edge.decisions import Decision, DecisionLog
 from loci.edge.embed import HashEmbedder
 from loci.edge.gate import AnswerGate
 from loci.edge.outbox import Outbox
+from loci.edge.qdrant_ops import OpsLog
 from loci.edge.store import EdgeMemoryStore, Memory
 from loci.edge.sync import SummaryReport, SyncEngine
 from loci.spatial.hilbert import HilbertIndex
@@ -77,7 +79,8 @@ class Fleet:
         # A server keeps its data across runs, but the robots here are fresh: use a fresh collection
         # (dropped on close) unless the operator named one.
         env.setdefault("LOCI_QDRANT_COLLECTION", f"loci_edge_demo_{int(time.time() * 1000)}")
-        self.cloud, self.cloud_kind = open_cloud(self.dir / "cloud", dim, env)
+        self.ops = OpsLog(capacity=600)  # every Qdrant call in the fleet: robots and cloud
+        self.cloud, self.cloud_kind = open_cloud(self.dir / "cloud", dim, env, ops=self.ops)
         # Cloud-side processes: conflict reconciler and the fleet-briefing brain.
         self.conflicts = ConflictLog(self.dir / "conflicts.db")
         self.reconciler = Reconciler(self.cloud, self.conflicts)
@@ -92,7 +95,11 @@ class Fleet:
         for name in ROUTES:
             link = Link(True)
             store = EdgeMemoryStore(
-                self.dir / name, dim, name, mirror_path=self.dir / f"{name}-mirror"
+                self.dir / name,
+                dim,
+                name,
+                mirror_path=self.dir / f"{name}-mirror",
+                ops_log=self.ops,
             )
             outbox = Outbox(self.dir / f"{name}-outbox.db")
             log = DecisionLog(self.dir / f"{name}-decisions.db")
@@ -100,6 +107,9 @@ class Fleet:
             engine = SyncEngine(store, outbox, linked, log=log)
             gate = AnswerGate(store, self.embedder, linked)
             self.nodes[name] = Node(name, link, store, outbox, log, engine, gate)
+        # Edge devices running as separate processes (python -m loci.edge.node), by name.
+        self.remote: dict[str, dict[str, Any]] = {}
+        self._commands: dict[str, list[dict]] = {}
         self._auto = False
         self._thread: threading.Thread | None = None
 
@@ -323,6 +333,86 @@ class Fleet:
             },
         }
 
+    # -- edge devices in other processes ------------------------------------------------
+
+    REMOTE_STALE_S = 5.0
+
+    def heartbeat(self, body: dict) -> dict:
+        """A remote node reports telemetry; it gets its pending commands and the fleet config."""
+        name = str(body.get("name", ""))[:64]
+        if not name or name in self.nodes:
+            return {"error": "name missing or taken by an in-process robot"}
+        with self.lock:
+            prev = self.remote.get(name)
+            if prev is None:
+                self._event(name, "device", f"edge device joined (pid {body.get('pid')})")
+            elif time.time() - prev["last_seen"] > self.REMOTE_STALE_S:
+                self._event(name, "network", "edge device is back online; syncing its backlog")
+            if prev is not None and body.get("restarts", 0) > prev.get("restarts", 0):
+                self._event(
+                    name, "device", f"edge device restarted (pid {body.get('pid')}); outbox intact"
+                )
+            self.remote[name] = {**body, "last_seen": time.time()}
+            cmds = self._commands.pop(name, [])
+        return {
+            "commands": cmds,
+            "config": {"dim": self.dim, "embedder": self.embedder.name},
+        }
+
+    def remote_pushed(self, n: int) -> None:
+        with self.lock:
+            self._cloud_cycle()
+
+    def command(self, name: str, cmd: dict) -> None:
+        if name not in self.remote:
+            raise KeyError(name)
+        with self.lock:
+            self._commands.setdefault(name, []).append(cmd)
+            what = f"outage for {cmd['outage_s']} s" if "outage_s" in cmd else json.dumps(cmd)
+            self._event(name, "command", f"command queued: {what}")
+
+    def qdrant_view(self) -> dict:
+        """What Qdrant is doing, across the whole fleet: live calls, latency per call kind,
+        on-device facet counts and footprints."""
+        from importlib.metadata import PackageNotFoundError, version
+
+        def ver(pkg: str) -> str:
+            try:
+                return version(pkg)
+            except PackageNotFoundError:
+                return "not installed"
+
+        with self.lock:
+            devices: dict[str, dict[str, Any]] = {}
+            for name, n in self.nodes.items():
+                devices[name] = {
+                    "footprint": n.store.footprint(),
+                    "sync_state": n.store.facets("sync_state"),
+                    "role": n.store.facets("role", include_mirror=True),
+                }
+            for r in self.remote_view():
+                devices[r["name"]] = {"footprint": r.get("footprint", {}), "remote": True}
+            return {
+                "engine": {
+                    "edge": f"qdrant-edge-py {ver('qdrant-edge-py')}",
+                    "client": f"qdrant-client {ver('qdrant-client')}",
+                    "cloud": self.cloud_kind,
+                },
+                "total_calls": self.ops.total_calls(),
+                "stats": self.ops.stats(),
+                "recent": self.ops.recent(80),
+                "devices": devices,
+            }
+
+    def remote_view(self) -> list[dict]:
+        now = time.time()
+        with self.lock:
+            out = []
+            for _name, t in sorted(self.remote.items()):
+                age = now - t["last_seen"]
+                out.append({**t, "online": age < self.REMOTE_STALE_S, "last_seen_s": round(age, 1)})
+            return out
+
     def resolve_conflict(self, conflict_id: int, approve: bool) -> dict | None:
         with self.lock:
             res = self.conflicts.resolve(conflict_id, approve)
@@ -398,6 +488,10 @@ class Fleet:
                 "bytes": self._bytes_view(),
                 "events": list(self.events)[:30],
                 "auto_sync": self._auto,
+                "remote": [
+                    {k: r[k] for k in ("name", "online", "last_seen_s", "pid") if k in r}
+                    for r in self.remote_view()
+                ],
             }
 
     def decisions(self, name: str, limit: int = 40) -> list[dict]:

@@ -6,7 +6,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from loci.edge.embed import HashEmbedder, make_embedder
+pytest.importorskip("qdrant_edge")  # importing loci.edge loads the Edge store
+
+from loci.edge.embed import HashEmbedder, make_embedder  # noqa: E402
 
 
 def test_hash_stand_in_is_labelled_and_unit_norm():
