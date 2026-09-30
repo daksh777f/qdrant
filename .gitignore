@@ -38,3 +38,8 @@ loci-core/target/
 
 # Python virtual environments
 .venv/
+
+# fetched evaluation datasets (pinned by SHA-256 in benchmarks/edge_real_eval.py)
+benchmarks/data/
+.qdrant-data/
+.demo-video-tmp/

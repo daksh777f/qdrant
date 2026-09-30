@@ -70,6 +70,11 @@ edge = [
     "qdrant-edge-py>=0.8.0",
     "qdrant-client>=1.10",  # QdrantServerCloud uses query_points
 ]
+real-models = [
+    "fastembed>=0.4",  # Qdrant's embedding library (downloads the model on first use)
+    "onnxruntime>=1.17",
+    "tokenizers>=0.15",
+]
 edge-ui = [
     "qdrant-edge-py>=0.8.0",
     "qdrant-client>=1.10",
@@ -159,5 +164,8 @@ module = [
     "fastapi.*",
     "uvicorn",
     "pydantic",
+    "fastembed",
+    "onnxruntime",
+    "tokenizers",
 ]
 ignore_missing_imports = true

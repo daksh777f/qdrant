@@ -1,0 +1,78 @@
+{
+  "embedder": "hash-bow-384 (stand-in, not a semantic model)",
+  "embedder_real": false,
+  "embedder_note": "hash stand-in requested",
+  "retrieval": {
+    "modes": {
+      "bm25 (Qdrant Edge sparse)": {
+        "recall@1": 0.899,
+        "recall@10": 0.976,
+        "mrr@10": 0.926,
+        "p50_ms": 0.64,
+        "p95_ms": 1.26
+      },
+      "dense": {
+        "recall@1": 0.782,
+        "recall@10": 0.857,
+        "mrr@10": 0.808,
+        "p50_ms": 0.79,
+        "p95_ms": 1.24
+      },
+      "hybrid RRF (dense + bm25)": {
+        "recall@1": 0.788,
+        "recall@10": 0.988,
+        "mrr@10": 0.866,
+        "p50_ms": 1.68,
+        "p95_ms": 2.29
+      }
+    },
+    "corpus_sentences": 9225,
+    "retrieval_queries": 495,
+    "embed_per_s": 17136.2,
+    "ingest_per_s": 3586.1,
+    "footprint": {
+      "points_local": 9225,
+      "points_mirror": 0,
+      "indexed_vectors": 18439,
+      "segments": 2,
+      "disk_local_bytes": 68902912,
+      "disk_mirror_bytes": 0,
+      "vector_dim": 384,
+      "quantization": "none"
+    }
+  },
+  "gate": {
+    "queries": 995,
+    "answerable": 495,
+    "auroc_answerable_vs_not": 0.894,
+    "threshold": 0.5,
+    "answered_when_answerable_pct": 85.1,
+    "answered_when_unanswerable_pct": 11.8,
+    "precision_of_answers_pct": 79.0
+  },
+  "dedupe": {
+    "pairs": 1725,
+    "human_same_pct": 66.5,
+    "auroc": 0.746,
+    "best_f1": 0.821,
+    "best_f1_threshold": 0.498,
+    "at_dedupe_threshold": {
+      "threshold": 0.95,
+      "pairs_merged_pct": 0.8,
+      "precision_same_pct": 100.0,
+      "false_merge_rate_pct": 0.0,
+      "recall_same_pct": 1.2
+    },
+    "at_ambiguous_threshold": {
+      "threshold": 0.85,
+      "pairs_merged_pct": 14.2,
+      "precision_same_pct": 90.6,
+      "false_merge_rate_pct": 4.0,
+      "recall_same_pct": 19.4
+    }
+  },
+  "sts_spearman": {
+    "stsb": 0.488,
+    "sick": 0.525
+  }
+}

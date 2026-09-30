@@ -16,6 +16,7 @@ from typing import Any
 import qdrant_edge as qe
 
 from loci.edge.ids import content_hash, memory_id
+from loci.edge.qdrant_ops import InstrumentedShard, OpsLog
 from loci.spatial.hilbert import HilbertIndex
 
 _INT_FIELDS = ("timestamp_ms",)
@@ -70,8 +71,11 @@ class EdgeMemoryStore:
         quantization: str | None = None,
         vectors_on_disk: bool = False,
         indexing_threshold_kb: int | None = None,
+        ops_log: OpsLog | None = None,
     ) -> None:
         self.device_id = device_id
+        self.ops = ops_log if ops_log is not None else OpsLog()
+        self._paths = {"local": Path(path), "mirror": Path(mirror_path) if mirror_path else None}
         self.vector_size = vector_size
         self._epoch_size_ms = epoch_size_ms
         self._hilbert = HilbertIndex(resolutions or [4, 8, 12])
@@ -95,20 +99,21 @@ class EdgeMemoryStore:
                 else None
             ),
         )
-        self._shard = self._open_shard(Path(path))
+        self._shard = self._open_shard(Path(path), "local")
         # The mirror holds other devices' memories pulled from the cloud. Local
         # writes never touch it; it is rewritten only by :meth:`mirror_upsert`.
-        self._mirror = self._open_shard(Path(mirror_path)) if mirror_path else None
+        self._mirror = self._open_shard(Path(mirror_path), "mirror") if mirror_path else None
 
     # -- setup ---------------------------------------------------------
 
-    def _open_shard(self, path: Path) -> Any:
+    def _open_shard(self, path: Path, name: str) -> Any:
         path.mkdir(parents=True, exist_ok=True)
         if any(path.iterdir()):
-            return qe.EdgeShard.load(str(path))
-        shard = qe.EdgeShard.create(str(path), self._cfg)
-        self._create_indexes(shard)
-        return shard
+            shard = qe.EdgeShard.load(str(path))
+        else:
+            shard = qe.EdgeShard.create(str(path), self._cfg)
+            self._create_indexes(shard)
+        return InstrumentedShard(shard, self.ops, self.device_id, name)
 
     def _create_indexes(self, shard: Any) -> None:
         upd = qe.UpdateOperation
@@ -175,11 +180,22 @@ class EdgeMemoryStore:
         time_window_ms: tuple[int, int] | None = None,
         include_mirror: bool = True,
         current_only: bool = False,
+        recency_half_life_ms: int | None = None,
+        now_ms: int | None = None,
+        diverse: bool = False,
+        diversity: float = 0.5,
     ) -> list[SearchHit]:
         """Dense, BM25, or hybrid (RRF) search over the local shard and the fleet mirror.
 
         Both shards are queried and merged. Where the same point ID is in both,
         the local copy wins (local edits override the mirror).
+
+        Scoring runs inside Qdrant Edge, on the device:
+
+        * ``recency_half_life_ms``: the dense score is multiplied by an exponential time decay
+          (a Qdrant ``Formula`` with ``Decay``): a memory ``half_life`` old counts half.
+        * ``diverse``: the dense branch uses Qdrant's MMR, so near-duplicate hits do not crowd
+          out the rest (``diversity`` is MMR's lambda: 1 = pure relevance, 0 = pure diversity).
         """
         if vector is None and not text:
             raise ValueError("search needs a vector, text, or both")
@@ -189,7 +205,14 @@ class EdgeMemoryStore:
             shards.append(("mirror", self._mirror))
         branches = []
         if vector is not None:
-            branches.append(("dense", qe.Query.Nearest(vector, using="dense")))
+            nearest = qe.Query.Nearest(vector, using="dense")
+            if diverse:
+                branches.append(("dense", qe.Mmr(vector, float(diversity), 100, using="dense")))
+            elif recency_half_life_ms:
+                now = now_ms if now_ms is not None else int(time.time() * 1000)
+                branches.append(("dense", _Recency(nearest, now, recency_half_life_ms)))
+            else:
+                branches.append(("dense", nearest))
         if text:
             branches.append(("bm25", qe.Query.Nearest(self._bm25.embed_query(text), using="bm25")))
         # Per branch, merge the shards by raw score (local wins on duplicate IDs),
@@ -204,12 +227,30 @@ class EdgeMemoryStore:
         pool = max(limit * 3, 20)
         merged: dict[str, SearchHit] = {}
         for source, shard in shards:  # local first, so it wins duplicate IDs
-            req = qe.QueryRequest(
-                query=query, filter=flt, limit=pool, with_payload=True, params=self._search_params
-            )
-            for h in shard.query(req):
+            if isinstance(query, _Recency):
+                req = qe.QueryRequest(
+                    prefetches=[
+                        qe.Prefetch(
+                            query=query.nearest, filter=flt, limit=pool, params=self._search_params
+                        )
+                    ],
+                    query=query.formula(),
+                    limit=pool,
+                    with_payload=True,
+                )
+            else:
+                req = qe.QueryRequest(
+                    query=query,
+                    filter=flt,
+                    limit=pool,
+                    with_payload=True,
+                    params=self._search_params,
+                )
+            ordered = isinstance(query, qe.Mmr)  # MMR's order is the answer; its scores are not
+            for rank, h in enumerate(shard.query(req)):
+                score = 1.0 / (rank + 1) if ordered else float(h.score)
                 merged.setdefault(
-                    str(h.id), SearchHit(str(h.id), float(h.score), dict(h.payload or {}), source)
+                    str(h.id), SearchHit(str(h.id), score, dict(h.payload or {}), source)
                 )
         return sorted(merged.values(), key=lambda h: -h.score)
 
@@ -381,6 +422,35 @@ class EdgeMemoryStore:
             out.append({"id": str(r.id), "vector": list(vec), "payload": dict(r.payload or {})})
         return out
 
+    def facets(self, key: str, *, include_mirror: bool = False, limit: int = 20) -> dict[str, int]:
+        """Value counts for a payload field, computed by Qdrant's facet API on the device."""
+        out: dict[str, int] = {}
+        shards = [self._shard] + ([self._mirror] if include_mirror and self._mirror else [])
+        for shard in shards:
+            for h in shard.facet(qe.FacetRequest(key, limit=limit, exact=True)).hits:
+                out[str(h.value)] = out.get(str(h.value), 0) + int(h.count)
+        return out
+
+    def footprint(self) -> dict[str, Any]:
+        """What this memory costs the device: points, indexed vectors, allocated disk."""
+
+        def allocated(p: Path | None) -> int:
+            if p is None or not p.exists():
+                return 0
+            return sum(f.stat().st_blocks * 512 for f in p.rglob("*") if f.is_file())
+
+        info = self._shard.info()
+        return {
+            "points_local": int(info.points_count),
+            "points_mirror": int(self._mirror.info().points_count) if self._mirror else 0,
+            "indexed_vectors": int(info.indexed_vectors_count),
+            "segments": int(info.segments_count),
+            "disk_local_bytes": allocated(self._paths["local"]),
+            "disk_mirror_bytes": allocated(self._paths["mirror"]),
+            "vector_dim": self.vector_size,
+            "quantization": self.quantization or "none",
+        }
+
     def optimize(self) -> None:
         """Run Edge's optimizers (builds HNSW past the indexing threshold)."""
         self._shard.optimize()
@@ -394,6 +464,26 @@ class EdgeMemoryStore:
             if shard is not None:
                 shard.flush()
                 shard.close()
+
+
+@dataclass
+class _Recency:
+    """Dense nearest-neighbour re-scored on-device by ``score * exp_decay(age)``."""
+
+    nearest: Any
+    now_ms: int
+    half_life_ms: int
+
+    def formula(self) -> Any:
+        x = qe.Expression
+        decay = x.Decay(
+            qe.DecayKind.Exp,
+            x.Variable("timestamp_ms"),
+            x.Constant(float(self.now_ms)),
+            0.5,  # the factor at distance == scale: one half-life
+            float(self.half_life_ms),
+        )
+        return qe.Formula(x.Mult([x.Variable("$score"), decay]))
 
 
 def _quantization_config(mode: str | None) -> Any:
