@@ -1,0 +1,44 @@
+{
+  "n": 50000,
+  "dim": 1024,
+  "rows": [
+    {
+      "config": "baseline (float32)",
+      "disk_mb": 541.8,
+      "ingest_per_s": 2343,
+      "rss_growth_mb": 565.1,
+      "p50_ms": 3.41,
+      "p95_ms": 5.1,
+      "recall_at_10": 1.0
+    },
+    {
+      "config": "scalar int8",
+      "disk_mb": 593.2,
+      "ingest_per_s": 2279,
+      "rss_growth_mb": 614.0,
+      "p50_ms": 3.12,
+      "p95_ms": 4.09,
+      "recall_at_10": 0.906
+    },
+    {
+      "config": "binary 1-bit",
+      "disk_mb": 551.5,
+      "ingest_per_s": 2122,
+      "rss_growth_mb": 574.2,
+      "p50_ms": 3.47,
+      "p95_ms": 5.39,
+      "recall_at_10": 0.292
+    },
+    {
+      "config": "binary + originals on disk",
+      "disk_mb": 551.6,
+      "ingest_per_s": 2133,
+      "rss_growth_mb": 409.2,
+      "p50_ms": 4.55,
+      "p95_ms": 7.28,
+      "recall_at_10": 0.293
+    }
+  ],
+  "baseline_rss_growth_mb": 565.1,
+  "note": "synthetic clustered vectors; fresh-process RSS includes evictable file-backed pages"
+}
