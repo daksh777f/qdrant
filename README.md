@@ -38,38 +38,34 @@
 > **A robot's memory is a place and a moment, so deciding what to send, what is a duplicate and
 > what is a conflict are geometric questions. Only surprise crosses the wire.**
 
-Each device keeps a searchable [Qdrant Edge](https://qdrant.tech/edge/) shard and works fully
-offline. It decides what is worth syncing, reconciles conflicting sightings by place and time, and
-receives fleet-level briefings pushed back down from the cloud.
+Every robot keeps its own searchable [Qdrant Edge](https://qdrant.tech/edge/) shards, works fully
+offline, decides on the device what is worth syncing, and gets fleet knowledge pushed back down.
+Devices run as **separate processes** (or machines) syncing over HTTP to a cloud that can be a
+**Qdrant Server**. A live inspector shows every Qdrant call the fleet makes.
 
 <p align="center">
-  <img src="docs/assets/edge-hero.svg" alt="Bytes sent and events kept: place-aware vs place-blind dedupe" width="80%">
+  <img src="docs/assets/edge-mission-control.png" alt="Mission control: fleet with process devices, map, Qdrant Edge inspector" width="95%">
 </p>
 
 ```bash
 make setup     # no Docker, no Qdrant Server, no API key
-make verify    # ~40 s: re-measures every claim, exits non-zero if one fails
-make ui        # mission control at http://127.0.0.1:8765
+make fleet     # mission control + 2 edge-device processes at http://127.0.0.1:8765
+make verify    # 12 checks on synthetic ground truth, fails loudly
+make eval      # public human-labelled datasets (STS-B, MSRP, SICK), SHA-256 pinned
 ```
 
-<p align="center">
-  <img src="docs/assets/edge-conflicts-and-gate.png" alt="Mission control: decisions, sync diff, conflict inbox, gated answers" width="90%">
-</p>
+| Measured | Result | Data |
+|:--|:--|:--|
+| Paraphrase retrieval on Qdrant Edge, 495 queries among 9,225 real sentences | hybrid recall@10 **0.988**, BM25 p95 1.3 ms | real, public |
+| Answer gate: answerable vs unanswerable questions | ROC-AUC 0.894 (answers 12% of unanswerable: reported, not hidden) | real, public |
+| Bytes sent vs sending everything / events kept | **14.7%** / **100%** (place-blind dedupe: 88%) | synthetic ground truth |
+| Device process crash (`kill -9`) mid-outage | restart, backlog delivered, nothing lost | end-to-end test |
+| Conflict engine on labelled pairs | 80 / 80 | synthetic ground truth |
 
-| Measured (`make verify`, synthetic seeded data) | |
-|:--|:--|
-| Offline hybrid search, 5,000 x 384-d, HNSW built | p95 2.1 ms, recall@10 = 1.0 vs exact |
-| Bytes sent vs. sending everything | 14.7% (floor for this stream 8.0%) |
-| Real events still retrievable at that setting | 100% (a place-blind similarity dedupe: 88%) |
-| Genuinely new memories wrongly suppressed (negative control) | 0% |
-| Conflict engine on labelled pairs | 80 / 80 correct |
-| Private memories that reached the cloud when force-queued | 0 of 15 |
-
-Read the [platform guide](docs/EDGE_PLATFORM.md) (goal-by-goal mapping, design, **known
-limitations**), the [3-minute demo script](docs/DEMO_SCRIPT.md), or watch the
-[90-second recording](docs/assets/edge-demo.webm). Honest status: the default cloud is a local
-stand-in; a `QdrantServerCloud` client (`LOCI_QDRANT_URL`, `make ui-server`) is built and tested against
-qdrant-client's in-process engine, but not yet against a live server.
+Semantic numbers above use a labelled hashed stand-in embedder; set `LOCI_EMBEDDER=fastembed` for a
+real model. Read the [platform guide](docs/EDGE_PLATFORM.md) (goal-by-goal mapping, Qdrant features,
+data honesty, **known limitations**), the [demo script](docs/DEMO_SCRIPT.md), or watch the
+[2-minute recording](docs/assets/edge-demo.webm).
 
 The rest of this README covers the underlying LOCI spatiotemporal memory engine.
 
