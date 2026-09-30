@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from loci.edge.cloud_http import cloud_router
 from loci.edge.sim import Fleet
 
 STATIC = Path(__file__).parent / "static"
@@ -42,6 +45,16 @@ def create_app(fleet: Fleet | None = None, *, autosync: bool = True) -> FastAPI:
 
     app = FastAPI(title="LOCI Edge Mission Control", lifespan=lifespan)
     app.state.fleet = fleet
+    # The cloud's API, for edge devices running as separate processes (python -m loci.edge.node).
+    app.include_router(
+        cloud_router(
+            lambda: fleet.cloud,
+            on_upsert=fleet.remote_pushed,
+            on_heartbeat=fleet.heartbeat,
+            token=os.environ.get("LOCI_CLOUD_TOKEN"),
+            lock=fleet.lock,
+        )
+    )
 
     def robot(name: str) -> str:
         if name not in fleet.nodes:
@@ -84,6 +97,31 @@ def create_app(fleet: Fleet | None = None, *, autosync: bool = True) -> FastAPI:
     @app.post("/api/scenario/both-toolbox")
     def both_toolbox() -> dict:
         return fleet.both_see_toolbox()
+
+    @app.get("/api/devices")
+    def devices() -> list[dict]:
+        return fleet.remote_view()
+
+    @app.post("/api/devices/{name}/command")
+    def device_command(name: str, body: Annotated[dict, Body()]) -> dict:
+        cmd: dict = {}
+        if "outage_s" in body:
+            cmd["outage_s"] = max(1, min(int(body["outage_s"]), 300))
+        if body.get("event") in {"spill", "toolbox"}:
+            cmd["event"] = body["event"]
+        if "pause" in body:
+            cmd["pause"] = bool(body["pause"])
+        if not cmd:
+            raise HTTPException(400, "expected outage_s, event or pause")
+        try:
+            fleet.command(name, cmd)
+        except KeyError:
+            raise HTTPException(404, f"unknown device {name!r}") from None
+        return {"queued": cmd}
+
+    @app.get("/api/qdrant")
+    def qdrant() -> dict:
+        return fleet.qdrant_view()
 
     @app.get("/api/cloud")
     def cloud() -> dict:

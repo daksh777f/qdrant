@@ -171,7 +171,9 @@ class CloudAdmin(CloudStore, Protocol):
 class LocalCloud:
     """Cloud stand-in backed by an Edge shard; needs no server or Docker."""
 
-    def __init__(self, path: str | Path, vector_size: int, link: Link | None = None) -> None:
+    def __init__(
+        self, path: str | Path, vector_size: int, link: Link | None = None, ops: Any = None
+    ) -> None:
         self._link = link or Link(True)
         self._path = Path(path)
         self._path.mkdir(parents=True, exist_ok=True)
@@ -179,9 +181,13 @@ class LocalCloud:
             vectors={"dense": qe.EdgeVectorParams(size=vector_size, distance=qe.Distance.Cosine)},
         )
         if any(self._path.iterdir()):
-            self._shard = qe.EdgeShard.load(str(self._path))
+            self._shard: Any = qe.EdgeShard.load(str(self._path))
         else:
             self._shard = qe.EdgeShard.create(str(self._path), cfg)
+        if ops is not None:
+            from loci.edge.qdrant_ops import InstrumentedShard
+
+            self._shard = InstrumentedShard(self._shard, ops, "cloud", "cloud")
         self.bytes_received = 0
         self.kind = "local stand-in"
 

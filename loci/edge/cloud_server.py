@@ -25,6 +25,7 @@ them), so in normal operation each ID has a single writer.
 from __future__ import annotations
 
 import os
+import time
 import warnings
 from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
@@ -66,12 +67,14 @@ class QdrantServerCloud:
         collection: str = DEFAULT_COLLECTION,
         client: QdrantClient | None = None,
         timeout: float = 10.0,
+        ops: Any = None,
     ) -> None:
         if client is None and not url:
             raise ValueError("give a url (or ':memory:') or a client")
         self.collection = collection
         self.vector_size = vector_size
         self.bytes_received = 0
+        self._ops = ops
         self.kind = f"qdrant-server @ {url or 'client'}"
         self._client = client or (
             QdrantClient(":memory:")
@@ -84,8 +87,20 @@ class QdrantServerCloud:
 
     def _call(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """Run a client call, turning connectivity failures into ``LinkDown``."""
+        t0 = time.perf_counter_ns()
         try:
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            if self._ops is not None:
+                from loci.edge.qdrant_ops import Op
+
+                name = getattr(fn, "__name__", "call")
+                n = len(result) if isinstance(result, (list, dict)) else 0
+                us = (time.perf_counter_ns() - t0) // 1000
+                now = int(time.time() * 1000)
+                self._ops.add(
+                    Op(now, "cloud", "qdrant-server", name.strip("_"), self.collection, us, n)
+                )
+            return result
         except LinkDown:
             raise
         except Exception as exc:
@@ -264,6 +279,7 @@ def open_cloud(
     path: Any,
     vector_size: int,
     env: Mapping[str, str] | None = None,
+    ops: Any = None,
 ) -> tuple[CloudAdmin, str]:
     """The configured cloud: Qdrant Server if ``LOCI_QDRANT_URL`` is set, else the local stand-in.
 
@@ -282,9 +298,10 @@ def open_cloud(
                 vector_size=vector_size,
                 api_key=env.get("LOCI_QDRANT_API_KEY"),
                 collection=env.get("LOCI_QDRANT_COLLECTION", DEFAULT_COLLECTION),
+                ops=ops,
             )
             return cloud, cloud.kind
         except LinkDown as exc:
-            local = LocalCloud(path, vector_size)
+            local = LocalCloud(path, vector_size, ops=ops)
             return local, f"local stand-in (Qdrant Server at {url} unreachable: {exc})"
-    return LocalCloud(path, vector_size), "local stand-in (no Qdrant Server configured)"
+    return LocalCloud(path, vector_size, ops=ops), "local stand-in (no Qdrant Server configured)"

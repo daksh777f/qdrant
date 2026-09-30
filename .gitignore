@@ -43,3 +43,4 @@ loci-core/target/
 benchmarks/data/
 .qdrant-data/
 .demo-video-tmp/
+edge-nodes/

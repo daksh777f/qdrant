@@ -21,7 +21,7 @@ from loci.spatial.hilbert import HilbertIndex
 
 _INT_FIELDS = ("timestamp_ms",)
 _FLOAT_FIELDS = ("x", "y", "z")
-_KEYWORD_FIELDS = ("sync_state", "device_id")
+_KEYWORD_FIELDS = ("sync_state", "device_id", "role", "kind")
 _RRF_K = 60
 _HIDDEN_ROLES = ("merged", "previous")
 ROLE_FIELDS = ("entity_id", "role", "merged_into", "entity_devices", "entity_size")
@@ -110,21 +110,23 @@ class EdgeMemoryStore:
         path.mkdir(parents=True, exist_ok=True)
         if any(path.iterdir()):
             shard = qe.EdgeShard.load(str(path))
+            self._create_indexes(shard, only_missing=True)  # older shards: add new indexes
         else:
             shard = qe.EdgeShard.create(str(path), self._cfg)
             self._create_indexes(shard)
         return InstrumentedShard(shard, self.ops, self.device_id, name)
 
-    def _create_indexes(self, shard: Any) -> None:
-        upd = qe.UpdateOperation
-        for r in self._hilbert.resolutions:
-            shard.update(upd.create_field_index(f"hilbert_r{r}", qe.PayloadSchemaType.Integer))
-        for f in _INT_FIELDS:
-            shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Integer))
-        for f in _FLOAT_FIELDS:
-            shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Float))
-        for f in _KEYWORD_FIELDS:
-            shard.update(upd.create_field_index(f, qe.PayloadSchemaType.Keyword))
+    def _create_indexes(self, shard: Any, *, only_missing: bool = False) -> None:
+        have = set(str(k) for k in shard.info().payload_schema) if only_missing else set()
+        wanted = [
+            (f"hilbert_r{r}", qe.PayloadSchemaType.Integer) for r in self._hilbert.resolutions
+        ]
+        wanted += [(f, qe.PayloadSchemaType.Integer) for f in _INT_FIELDS]
+        wanted += [(f, qe.PayloadSchemaType.Float) for f in _FLOAT_FIELDS]
+        wanted += [(f, qe.PayloadSchemaType.Keyword) for f in _KEYWORD_FIELDS]
+        for field_name, schema in wanted:
+            if field_name not in have:
+                shard.update(qe.UpdateOperation.create_field_index(field_name, schema))
 
     # -- write ---------------------------------------------------------
 
@@ -203,7 +205,7 @@ class EdgeMemoryStore:
         shards = [("local", self._shard)]
         if include_mirror and self._mirror is not None:
             shards.append(("mirror", self._mirror))
-        branches = []
+        branches: list[tuple[str, Any]] = []
         if vector is not None:
             nearest = qe.Query.Nearest(vector, using="dense")
             if diverse:

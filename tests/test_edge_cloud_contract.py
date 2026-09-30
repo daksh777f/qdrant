@@ -33,7 +33,7 @@ from loci.edge.embed import HashEmbedder  # noqa: E402
 
 DIM = 16
 LIVE = os.environ.get("LOCI_TEST_QDRANT_URL")
-PARAMS = ["local", "server-memory", *(["server-live"] if LIVE else [])]
+PARAMS = ["local", "server-memory", "http", *(["server-live"] if LIVE else [])]
 
 
 def unit(seed: int) -> list[float]:
@@ -59,6 +59,9 @@ def cloud(request, tmp_path):
         c = LocalCloud(tmp_path / "cloud", DIM)
     elif request.param == "server-memory":
         c = QdrantServerCloud(":memory:", vector_size=DIM)
+    elif request.param == "http":
+        pytest.importorskip("fastapi")
+        c = _HttpUnderTest(LocalCloud(tmp_path / "cloud", DIM))
     else:
         c = QdrantServerCloud(
             LIVE, vector_size=DIM, collection=f"loci_test_{uuid.uuid4().hex[:10]}"
@@ -67,6 +70,42 @@ def cloud(request, tmp_path):
     if request.param == "server-live":
         c._client.delete_collection(c.collection)
     c.close()
+
+
+class _HttpUnderTest:
+    """Device-facing calls go over a real HTTP socket (HttpCloud -> cloud_router); the
+    cloud-side admin calls (scan, apply_roles) go to the backing store, as in production."""
+
+    def __init__(self, backing):
+        import socket
+        import threading
+        import time
+
+        import uvicorn
+        from fastapi import FastAPI
+
+        from loci.edge.cloud_http import HttpCloud, cloud_router
+
+        self.backing = backing
+        app = FastAPI()
+        app.include_router(cloud_router(lambda: backing, token="t0k"))
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+        self.server = uvicorn.Server(uvicorn.Config(app, port=port, log_level="error"))
+        threading.Thread(target=self.server.run, daemon=True).start()
+        while not self.server.started:
+            time.sleep(0.02)
+        self.http = HttpCloud(f"http://127.0.0.1:{port}", token="t0k")
+
+    def __getattr__(self, name):
+        if name in {"upsert", "index", "versions", "count", "get", "search"}:
+            return getattr(self.http, name)
+        return getattr(self.backing, name)
+
+    def close(self):
+        self.server.should_exit = True
+        self.backing.close()
 
 
 # ------------------------------------------------------------------ the contract
@@ -302,3 +341,19 @@ def test_http_401_is_a_real_error_not_an_outage():
         assert not isinstance(ei.value, LinkDown)
     finally:
         srv.shutdown()
+
+
+def test_http_cloud_rejects_a_bad_token_and_reports_outage_as_linkdown(tmp_path):
+    pytest.importorskip("fastapi")
+    from loci.edge.cloud_http import HttpCloud
+
+    c = _HttpUnderTest(LocalCloud(tmp_path / "cloud", DIM))
+    bad = HttpCloud(c.http.base.rsplit("/cloud", 1)[0], token="wrong")
+    with pytest.raises(RuntimeError, match="401"):
+        bad.count()
+    c.close()
+    import time
+
+    time.sleep(0.3)
+    with pytest.raises(LinkDown):  # server gone: an outage, not an error
+        c.http.count()
