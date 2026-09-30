@@ -51,30 +51,25 @@ def timed(fn, queries) -> list[float]:
     return out
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=10_000)
-    ap.add_argument("--dim", type=int, default=384)
-    ap.add_argument("--queries", type=int, default=200)
-    args = ap.parse_args()
+def run(n: int = 10_000, dim: int = 384, queries: int = 200) -> dict:
+    """Ingest *n* synthetic memories into a fresh Edge store and measure search."""
     rng = np.random.default_rng(0)
-
-    centers = rng.normal(size=(50, args.dim))
-    vecs = centers[rng.integers(0, 50, args.n)] + 0.5 * rng.normal(size=(args.n, args.dim))
-    xs = rng.random((args.n, 3))
-    texts = [" ".join(rng.choice(WORDS, 4)) for _ in range(args.n)]
+    centers = rng.normal(size=(50, dim))
+    vecs = centers[rng.integers(0, 50, n)] + 0.5 * rng.normal(size=(n, dim))
+    xs = rng.random((n, 3))
+    texts = [" ".join(rng.choice(WORDS, 4)) for _ in range(n)]
 
     tmp = tempfile.mkdtemp(prefix="loci-edge-bench-")
-    store = EdgeMemoryStore(Path(tmp) / "shard", args.dim, "bench")
+    store = EdgeMemoryStore(Path(tmp) / "shard", dim, "bench")
     t0 = time.perf_counter()
-    for i in range(args.n):
+    for i in range(n):
         store.put(Memory(f"m{i}", vecs[i].tolist(), *xs[i], timestamp_ms=1_000 + i, text=texts[i]))
     ingest_s = time.perf_counter() - t0
     store.optimize()
     indexed = store.indexed_vectors()
 
-    qi = rng.integers(0, args.n, args.queries)
-    qv = (vecs[qi] + 0.3 * rng.normal(size=(args.queries, args.dim))).tolist()
+    qi = rng.integers(0, n, queries)
+    qv = (vecs[qi] + 0.3 * rng.normal(size=(queries, dim))).tolist()
     qt = [texts[i].split()[0] for i in qi]
     region = {"x_min": 0.0, "x_max": 0.25, "y_min": 0.0, "y_max": 0.25, "z_min": 0.0, "z_max": 1.0}
 
@@ -84,21 +79,20 @@ def main() -> None:
     )
     spatial = timed(lambda q: store.search(vector=q, bounds=region, limit=10), qv)
 
-    # recall@10 of the Edge index vs exact cosine over the same vectors
     mat = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
     hits = 0
-    for q in qv[:100]:
+    n_eval = min(100, len(qv))
+    for q in qv[:n_eval]:
         qn = np.asarray(q) / np.linalg.norm(q)
         exact = set(np.argsort(-(mat @ qn))[:10].tolist())
         got = {int(h.payload["key"][1:]) for h in store.search(vector=q, limit=10)}
         hits += len(exact & got)
-    recall = hits / (100 * 10)
-
-    result = {
-        "n": args.n,
-        "dim": args.dim,
+    store.close()
+    return {
+        "n": n,
+        "dim": dim,
         "hnsw_indexed_vectors": indexed,
-        "ingest_per_s": round(args.n / ingest_s, 1),
+        "ingest_per_s": round(n / ingest_s, 1),
         "latency_ms": {
             name: {
                 "p50": round(pct(v, 50), 2),
@@ -107,14 +101,22 @@ def main() -> None:
             }
             for name, v in [("dense", dense), ("hybrid_rrf", hybrid), ("dense_spatial", spatial)]
         },
-        "recall_at_10_vs_exact": round(recall, 3),
+        "recall_at_10_vs_exact": round(hits / (n_eval * 10), 3),
         "note": "synthetic clustered vectors, single process, warm cache, no network",
     }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--n", type=int, default=10_000)
+    ap.add_argument("--dim", type=int, default=384)
+    ap.add_argument("--queries", type=int, default=200)
+    args = ap.parse_args()
+    result = run(args.n, args.dim, args.queries)
     print(json.dumps(result, indent=2))
     out = Path(__file__).parent / "results" / "edge_latency.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(result, indent=2) + "\n")
-    store.close()
 
 
 if __name__ == "__main__":

@@ -191,6 +191,25 @@ Schedule rule: UI must show *something real* by Day 6; polish is not left to the
     60 junk queries max 0.34, 0% junk answered for any threshold 0.4-0.6. Re-measure when swapping embedders.
   * *Policy*: a same-place look-alike of another device's mirrored memory is synced so the cloud can adjudicate.
   * Suite: 765 passed / 10 skipped on both backends. Screenshot: `docs/assets/edge-conflicts-and-gate.png`.
+- **P5 done** (`benchmarks/edge_verify.py`, `Makefile`, `docs/EDGE_PLATFORM.md`, `docs/DEMO_SCRIPT.md`,
+  `scripts/record_demo.py`, README section, CI `edge` job): `make verify` re-measures every claim (12 checks,
+  about 40 s, non-zero exit on failure) and writes `benchmarks/results/edge_verify.{json,md}` plus the hero chart
+  (two stacked panels, validated palette, light/dark). `make record` re-records the captioned 90 s walkthrough and
+  doubles as an end-to-end UI check. Verified from a fresh non-editable install in a new venv (demo, verify,
+  UI all work with no Docker/server/key), and in a CI-equivalent env (mypy clean, tests pass, edge suites skip).
+  **The harness found three real defects that no unit test had**, all fixed with regression tests:
+  (1) relative-only novelty made an all-new stream look "average" and suppressed 86% of genuinely new memories
+  (negative control); (2) during calibrator warm-up a same-place look-alike was judged "familiar", kept local, and
+  later views deduped against that never-synced item, so the cloud never learned the event (recall 70%);
+  (3) `SyncPolicy` discarded a caller-supplied empty calibrator (`or` on an object with `__len__`).
+  Design consequence, measured: the default now sends ambiguous look-alikes (14.7% of bytes, 100% of events);
+  the old hold-back behaviour is the opt-in `hold_back_familiar` mode (12.5%, 95%). Place-aware dedupe vs a
+  place-blind similarity dedupe at the default threshold: 100% vs 88% of events at 14.7% vs 10.0% of bytes.
+  Also fixed: 25 mypy errors that would have failed CI's typecheck job, and a race in the demo story (auto-sync
+  vs. narration) via `--no-autosync`.
+- **Biggest remaining gap vs. the PS wording:** sync targets `LocalCloud`, not a Qdrant Server. Next (P6): a
+  `QdrantServerCloud` implementing `CloudStore` with `qdrant-client` (testable here against
+  `QdrantClient(":memory:")`), then partial-snapshot pull if a server is available.
 - Fixed on the way: consolidation depended on store scroll order; it is now canonically sorted.
 
 ## 7. Risks and mitigations

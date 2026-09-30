@@ -33,6 +33,47 @@
 
 ---
 
+## New: LOCI Edge, an offline-first memory and intelligence platform (Qdrant Edge)
+
+> **A robot's memory is a place and a moment, so deciding what to send, what is a duplicate and
+> what is a conflict are geometric questions. Only surprise crosses the wire.**
+
+Each device keeps a searchable [Qdrant Edge](https://qdrant.tech/edge/) shard and works fully
+offline. It decides what is worth syncing, reconciles conflicting sightings by place and time, and
+receives fleet-level briefings pushed back down from the cloud.
+
+<p align="center">
+  <img src="docs/assets/edge-hero.svg" alt="Bytes sent and events kept: place-aware vs place-blind dedupe" width="80%">
+</p>
+
+```bash
+make setup     # no Docker, no Qdrant Server, no API key
+make verify    # ~40 s: re-measures every claim, exits non-zero if one fails
+make ui        # mission control at http://127.0.0.1:8765
+```
+
+<p align="center">
+  <img src="docs/assets/edge-conflicts-and-gate.png" alt="Mission control: decisions, sync diff, conflict inbox, gated answers" width="90%">
+</p>
+
+| Measured (`make verify`, synthetic seeded data) | |
+|:--|:--|
+| Offline hybrid search, 5,000 x 384-d, HNSW built | p95 2.1 ms, recall@10 = 1.0 vs exact |
+| Bytes sent vs. sending everything | 14.7% (floor for this stream 8.0%) |
+| Real events still retrievable at that setting | 100% (a place-blind similarity dedupe: 88%) |
+| Genuinely new memories wrongly suppressed (negative control) | 0% |
+| Conflict engine on labelled pairs | 80 / 80 correct |
+| Private memories that reached the cloud when force-queued | 0 of 15 |
+
+Read the [platform guide](docs/EDGE_PLATFORM.md) (goal-by-goal mapping, design, **known
+limitations**), the [3-minute demo script](docs/DEMO_SCRIPT.md), or watch the
+[90-second recording](docs/assets/edge-demo.webm). Honest status: the cloud side is a local
+stand-in behind a small interface; a real Qdrant Server client is the next step.
+
+The rest of this README covers the underlying LOCI spatiotemporal memory engine.
+
+---
+
 ## Why LOCI?
 
 Physical AI runs on memory. A robot that forgets where it saw the pallet, a

@@ -20,7 +20,7 @@ import numpy as np
 from loci.edge.cloud import Link, LinkedCloud, LocalCloud
 from loci.edge.cloud_ai import CloudBrain, LLMClient
 from loci.edge.conflicts import ConflictLog, Reconciler
-from loci.edge.decisions import DecisionLog
+from loci.edge.decisions import Decision, DecisionLog
 from loci.edge.embed import HashEmbedder
 from loci.edge.gate import AnswerGate
 from loci.edge.outbox import Outbox
@@ -116,7 +116,7 @@ class Fleet:
         *,
         tilt: float | None = None,
         **kw: Any,
-    ):
+    ) -> Decision:
         base = self.embedder.embed(text)
         if tilt is not None:  # a blurry view: only ``tilt`` cosine similar to the clean one
             u = self.rng.normal(size=self.dim)
@@ -497,6 +497,7 @@ class Fleet:
         """Gated question answering: local, escalate to cloud, low-confidence, or abstain."""
         with self.lock:
             n = self.node(name)
+            assert n.gate is not None  # every node is built with a gate
             ans = n.gate.ask(text, current_only=not history)
             d = ans.to_dict()
             d["online"] = n.link.up

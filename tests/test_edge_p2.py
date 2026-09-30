@@ -19,6 +19,7 @@ from loci.edge import (  # noqa: E402
     SyncEngine,
     SyncPolicy,
 )
+from loci.retrieval.novelty import NoveltyCalibrator  # noqa: E402
 
 DIM = 32
 
@@ -44,7 +45,8 @@ class Robot:
             self.store,
             self.outbox,
             LinkedCloud(shared_cloud, self.link),
-            policy=SyncPolicy(config),
+            # A config means a summary-lane test: let the calibrator be ready immediately.
+            policy=SyncPolicy(config, NoveltyCalibrator(min_samples=1) if config else None),
             log=self.log,
         )
 
@@ -142,7 +144,13 @@ def test_what_robot_a_saw_is_not_novel_to_robot_b(world):
 
 
 def test_summary_lane_sends_far_fewer_bytes_than_raw(world):
-    cfg = PolicyConfig(dedupe_similarity=0.9999, sync_novelty=2.0, summarize_novelty=0.0)
+    cfg = PolicyConfig(
+        dedupe_similarity=0.9999,
+        sync_novelty=2.0,
+        summarize_novelty=0.0,
+        ambiguous_similarity=0.0,
+        hold_back_familiar=True,
+    )
     r = world("a", cfg)
     r.engine.observe(obs("first", unit(7), seed=0, metadata={"urgent": True}))  # goes raw
     base = unit(8)
@@ -162,7 +170,13 @@ def test_summary_lane_sends_far_fewer_bytes_than_raw(world):
 
 
 def test_summary_waits_out_an_outage(world):
-    cfg = PolicyConfig(dedupe_similarity=0.9999, sync_novelty=2.0, summarize_novelty=0.0)
+    cfg = PolicyConfig(
+        dedupe_similarity=0.9999,
+        sync_novelty=2.0,
+        summarize_novelty=0.0,
+        ambiguous_similarity=0.0,
+        hold_back_familiar=True,
+    )
     r = world("a", cfg)
     r.engine.observe(obs("first", unit(1), seed=0, metadata={"urgent": True}))
     for i in range(5):
@@ -256,3 +270,50 @@ def test_lookalike_of_another_devices_memory_is_sent_for_the_cloud_to_adjudicate
     # The same look-alike seen by the robot that owns the original stays a local matter.
     d2 = a.engine.observe(Memory("blurry-a", blurry.tolist(), 0.3, 0.5, 0.0, 3_000))
     assert "adjudicate" not in d2.reason
+
+
+def test_policy_honours_a_caller_supplied_empty_calibrator():
+    """Regression: an empty NoveltyCalibrator is falsy (__len__), so `or` used to discard it."""
+    mine = NoveltyCalibrator(min_samples=1)
+    assert SyncPolicy(None, mine).calibrator is mine
+
+
+def test_look_alike_at_same_place_is_not_hidden_while_the_device_is_still_learning(world):
+    """Regression (found by benchmarks/edge_verify.py): during warm-up the calibrator fell back
+    to novelty = 1 - similarity, so a same-place twin (cos ~0.88) was judged 'familiar', kept
+    local, and later views deduped against that never-synced item: the cloud never learned it."""
+    r = world("a")
+    base = unit(50)
+    r.engine.observe(obs("original", base, x=0.4, seed=1))
+    u = np.random.default_rng(6).normal(size=DIM)
+    u -= (u @ base) * base
+    u /= np.linalg.norm(u)
+    twin = 0.88 * base + np.sqrt(1 - 0.88**2) * u
+    d = r.engine.observe(Memory("twin", twin.tolist(), 0.41, 0.5, 0.0, 2_000))
+    assert d.action == "SYNC_NOW" and "same spot" in d.reason
+    r.engine.push()
+    assert r.engine.cloud.count() == 2  # the cloud knows both
+
+
+def test_genuinely_new_stream_is_never_suppressed_by_relative_novelty(world):
+    """Regression (negative control): calibration is relative to history, so a stream in which
+    everything is new used to look 'average' and get summarized or kept local."""
+    r = world("a")
+    rng = np.random.default_rng(3)
+    actions = []
+    for i in range(60):
+        v = rng.normal(size=DIM)
+        m = Memory(f"n{i}", (v / np.linalg.norm(v)).tolist(), *rng.random(2), 0.0, 1_000 + i)
+        actions.append(r.engine.observe(m).action)
+    assert actions.count("SYNC_NOW") >= 57
+
+
+def test_hold_back_mode_still_sends_until_the_device_has_learned_its_noise(world):
+    """In opt-in bandwidth mode, look-alikes are only held back once the calibrator is ready."""
+    r = world("a")
+    r.engine.policy = SyncPolicy(PolicyConfig(hold_back_familiar=True))  # default calibrator (10)
+    base = unit(60)
+    r.engine.observe(obs("original", base, x=0.4, seed=1))
+    d = r.engine.observe(obs("view", base, x=0.4, seed=2, noise=0.12))  # ~0.9 cosine to original
+    assert d.best_similarity is not None and d.best_similarity < 0.95
+    assert d.action == "SYNC_NOW" and "not yet learned" in d.reason

@@ -1,0 +1,359 @@
+{
+  "quick": false,
+  "latency": {
+    "n": 5000,
+    "dim": 384,
+    "hnsw_indexed_vectors": 5000,
+    "ingest_per_s": 3573.8,
+    "latency_ms": {
+      "dense": {
+        "p50": 1.01,
+        "p95": 1.33,
+        "mean": 1.05
+      },
+      "hybrid_rrf": {
+        "p50": 1.59,
+        "p95": 2.06,
+        "mean": 1.65
+      },
+      "dense_spatial": {
+        "p50": 4.12,
+        "p95": 4.97,
+        "mean": 6.09
+      }
+    },
+    "recall_at_10_vs_exact": 1.0,
+    "note": "synthetic clustered vectors, single process, warm cache, no network"
+  },
+  "sweep": {
+    "naive": {
+      "bytes": 295580,
+      "raw_sent": 500,
+      "summarized": 0,
+      "recall": 1.0,
+      "decisions": {}
+    },
+    "rows": [
+      {
+        "threshold": 0.99,
+        "place_aware": {
+          "bytes": 295580,
+          "raw_sent": 500,
+          "summarized": 0,
+          "recall": 1.0,
+          "decisions": {
+            "SYNC_NOW": 500
+          },
+          "bytes_pct": 100.0
+        },
+        "vector_only": {
+          "bytes": 295580,
+          "raw_sent": 500,
+          "summarized": 0,
+          "recall": 1.0,
+          "decisions": {
+            "SYNC_NOW": 500
+          },
+          "bytes_pct": 100.0
+        }
+      },
+      {
+        "threshold": 0.97,
+        "place_aware": {
+          "bytes": 214791,
+          "raw_sent": 357,
+          "summarized": 0,
+          "recall": 1.0,
+          "decisions": {
+            "SYNC_NOW": 357,
+            "DEDUPE": 143
+          },
+          "bytes_pct": 72.67
+        },
+        "vector_only": {
+          "bytes": 210649,
+          "raw_sent": 350,
+          "summarized": 0,
+          "recall": 0.975,
+          "decisions": {
+            "SYNC_NOW": 350,
+            "DEDUPE": 150
+          },
+          "bytes_pct": 71.27
+        }
+      },
+      {
+        "threshold": 0.95,
+        "place_aware": {
+          "bytes": 43576,
+          "raw_sent": 70,
+          "summarized": 0,
+          "recall": 1.0,
+          "decisions": {
+            "SYNC_NOW": 70,
+            "DEDUPE": 430
+          },
+          "bytes_pct": 14.74
+        },
+        "vector_only": {
+          "bytes": 29446,
+          "raw_sent": 47,
+          "summarized": 0,
+          "recall": 0.875,
+          "decisions": {
+            "SYNC_NOW": 47,
+            "DEDUPE": 453
+          },
+          "bytes_pct": 9.96
+        }
+      },
+      {
+        "threshold": 0.92,
+        "place_aware": {
+          "bytes": 36107,
+          "raw_sent": 58,
+          "summarized": 0,
+          "recall": 1.0,
+          "decisions": {
+            "SYNC_NOW": 58,
+            "DEDUPE": 442
+          },
+          "bytes_pct": 12.22
+        },
+        "vector_only": {
+          "bytes": 20125,
+          "raw_sent": 32,
+          "summarized": 0,
+          "recall": 0.8,
+          "decisions": {
+            "SYNC_NOW": 32,
+            "DEDUPE": 468
+          },
+          "bytes_pct": 6.81
+        }
+      },
+      {
+        "threshold": 0.9,
+        "place_aware": {
+          "bytes": 36107,
+          "raw_sent": 58,
+          "summarized": 0,
+          "recall": 1.0,
+          "decisions": {
+            "SYNC_NOW": 58,
+            "DEDUPE": 442
+          },
+          "bytes_pct": 12.22
+        },
+        "vector_only": {
+          "bytes": 20125,
+          "raw_sent": 32,
+          "summarized": 0,
+          "recall": 0.8,
+          "decisions": {
+            "SYNC_NOW": 32,
+            "DEDUPE": 468
+          },
+          "bytes_pct": 6.81
+        }
+      },
+      {
+        "threshold": 0.85,
+        "place_aware": {
+          "bytes": 34257,
+          "raw_sent": 55,
+          "summarized": 0,
+          "recall": 0.975,
+          "decisions": {
+            "SYNC_NOW": 55,
+            "DEDUPE": 445
+          },
+          "bytes_pct": 11.59
+        },
+        "vector_only": {
+          "bytes": 19497,
+          "raw_sent": 31,
+          "summarized": 0,
+          "recall": 0.775,
+          "decisions": {
+            "SYNC_NOW": 31,
+            "DEDUPE": 469
+          },
+          "bytes_pct": 6.6
+        }
+      },
+      {
+        "threshold": 0.8,
+        "place_aware": {
+          "bytes": 32367,
+          "raw_sent": 52,
+          "summarized": 0,
+          "recall": 0.9,
+          "decisions": {
+            "SYNC_NOW": 52,
+            "DEDUPE": 448
+          },
+          "bytes_pct": 10.95
+        },
+        "vector_only": {
+          "bytes": 13827,
+          "raw_sent": 22,
+          "summarized": 0,
+          "recall": 0.55,
+          "decisions": {
+            "SYNC_NOW": 22,
+            "DEDUPE": 478
+          },
+          "bytes_pct": 4.68
+        }
+      },
+      {
+        "threshold": 0.7,
+        "place_aware": {
+          "bytes": 32367,
+          "raw_sent": 52,
+          "summarized": 0,
+          "recall": 0.9,
+          "decisions": {
+            "SYNC_NOW": 52,
+            "DEDUPE": 448
+          },
+          "bytes_pct": 10.95
+        },
+        "vector_only": {
+          "bytes": 13827,
+          "raw_sent": 22,
+          "summarized": 0,
+          "recall": 0.55,
+          "decisions": {
+            "SYNC_NOW": 22,
+            "DEDUPE": 478
+          },
+          "bytes_pct": 4.68
+        }
+      }
+    ],
+    "hold_back_mode": {
+      "bytes": 37031,
+      "raw_sent": 57,
+      "summarized": 12,
+      "recall": 0.95,
+      "decisions": {
+        "SYNC_NOW": 57,
+        "DEDUPE": 430,
+        "KEEP_LOCAL": 1,
+        "SUMMARIZE_SYNC": 12
+      },
+      "bytes_pct": 12.53
+    },
+    "n_observations": 500,
+    "n_events": 40,
+    "ideal_bytes_pct": 8.0
+  },
+  "negative_controls": {
+    "n": 300,
+    "random_memories_synced_pct": 100.0,
+    "repeated_memory_suppressed_pct": 99.7
+  },
+  "convergence": {
+    "offline_observations_per_robot": 150,
+    "converged": true,
+    "rounds": 1,
+    "reconnect_to_converged_ms": 269.1,
+    "cloud_memories": 300
+  },
+  "conflicts": {
+    "dup": {
+      "correct": 20,
+      "total": 20
+    },
+    "moved": {
+      "correct": 20,
+      "total": 20
+    },
+    "distinct": {
+      "correct": 20,
+      "total": 20
+    },
+    "ambiguous": {
+      "correct": 20,
+      "total": 20
+    },
+    "errors": 0
+  },
+  "gate": {
+    "threshold": 0.5,
+    "relevant_queries": 59,
+    "junk_queries": 60,
+    "relevant_confidence_p5": 0.633,
+    "junk_confidence_max": 0.372,
+    "relevant_answered_pct": 98.3,
+    "junk_answered_pct": 0.0
+  },
+  "privacy": {
+    "private_memories": 15,
+    "reached_cloud": 0
+  },
+  "checks": [
+    {
+      "name": "edge recall@10 vs exact >= 0.95",
+      "ok": true,
+      "detail": "1.0"
+    },
+    {
+      "name": "offline hybrid search p95 < 50 ms",
+      "ok": true,
+      "detail": "2.06 ms"
+    },
+    {
+      "name": "default policy saves >= 70% of naive bytes",
+      "ok": true,
+      "detail": "sends 14.74% (floor 8.0%)"
+    },
+    {
+      "name": "default policy keeps >= 95% of events retrievable",
+      "ok": true,
+      "detail": "100%"
+    },
+    {
+      "name": "place-aware recall >= vector-only recall at every threshold",
+      "ok": true,
+      "detail": "loosest: 90% vs 55%"
+    },
+    {
+      "name": "negative control: >= 95% of new random memories synced",
+      "ok": true,
+      "detail": "100.0%"
+    },
+    {
+      "name": "negative control: >= 90% of repeats suppressed",
+      "ok": true,
+      "detail": "99.7%"
+    },
+    {
+      "name": "two robots converge after an outage",
+      "ok": true,
+      "detail": "269.1 ms, 1 round(s)"
+    },
+    {
+      "name": "conflict engine: zero errors on labelled pairs",
+      "ok": true,
+      "detail": "0 errors"
+    },
+    {
+      "name": "gate: no junk query answered",
+      "ok": true,
+      "detail": "0.0%"
+    },
+    {
+      "name": "gate: >= 90% of relevant queries answered",
+      "ok": true,
+      "detail": "98.3%"
+    },
+    {
+      "name": "privacy: no private memory reaches the cloud",
+      "ok": true,
+      "detail": "0 leaked"
+    }
+  ]
+}

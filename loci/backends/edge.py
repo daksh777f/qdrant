@@ -121,7 +121,7 @@ class EdgeStore:
             return 0
         present = [str(r.id) for r in shard.retrieve(ids, with_payload=False, with_vector=False)]
         if present:
-            shard.update(qe.UpdateOperation.delete_points(present))
+            shard.update(qe.UpdateOperation.delete_points(list[Any](present)))
         return len(present)
 
     def delete_points_in_time_range(
@@ -255,7 +255,7 @@ def _to_filter(payload_filter: dict | None) -> Any:
     """Translate the ``MemoryStore`` filter dict into an Edge ``Filter``."""
     if not payload_filter:
         return None
-    must = []
+    must: list[Any] = []
     for key, cond in payload_filter.items():
         if isinstance(cond, dict):
             if "any" in cond:

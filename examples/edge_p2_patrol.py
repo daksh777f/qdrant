@@ -46,7 +46,7 @@ class Robot:
 
     def see(self, key: str, base: np.ndarray, x: float, t: int, text: str = "", **kw) -> None:
         rng = np.random.default_rng(zlib.crc32(key.encode()))
-        vec = base + 0.03 * rng.normal(size=DIM)
+        vec = base + 0.02 * rng.normal(size=DIM)
         self.engine.observe(Memory(key, vec.tolist(), x, 0.5, 0.0, t, text=text, **kw))
 
 
