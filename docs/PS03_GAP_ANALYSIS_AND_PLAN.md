@@ -210,6 +210,16 @@ Schedule rule: UI must show *something real* by Day 6; polish is not left to the
 - **Biggest remaining gap vs. the PS wording:** sync targets `LocalCloud`, not a Qdrant Server. Next (P6): a
   `QdrantServerCloud` implementing `CloudStore` with `qdrant-client` (testable here against
   `QdrantClient(":memory:")`), then partial-snapshot pull if a server is available.
+- **P7 ("10x" pass)**: (1) *Data honesty*: `benchmarks/edge_real_eval.py` on public human-labelled
+  datasets (STS-B, MSRP, SICK; SHA-256 pinned): Qdrant Edge retrieval (BM25 / dense / hybrid), dedupe vs
+  human judges, abstention on answerable vs unanswerable queries. It exposed that the answer gate answers
+  12% of unanswerable real questions (synthetic junk had shown 0%); documented. Real embedders wired
+  (`fastembed`, local ONNX); running the downloaded third-party ONNX model was blocked by the sandbox's
+  permission policy, so committed semantic numbers use the labelled stand-in. (2) *Qdrant at the core*:
+  on-device recency (`Formula` + `Decay`), MMR, facets, and an inspector recording every engine call.
+  (3) *Real edge computing*: `python -m loci.edge.node` device processes over an HTTP cloud with telemetry,
+  commands, token auth; tested through an outage and `kill -9`. (4) *UI overhaul* + 2-min recording.
+  Quantization measured at 150k x 384 and 50k x 1024: no RAM saving, recall loss; stays opt-in.
 - Fixed on the way: consolidation depended on store scroll order; it is now canonically sorted.
 
 ## 7. Risks and mitigations

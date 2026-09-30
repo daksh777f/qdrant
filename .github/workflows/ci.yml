@@ -51,6 +51,9 @@ jobs:
       - name: Whole suite on the Edge backend
         run: LOCI_TEST_BACKEND=edge pytest tests/ -q --tb=short
 
+      - name: Real-data evaluation (public datasets, stand-in embedder)
+        run: python benchmarks/edge_real_eval.py --embedder hash --queries 300 --no-write
+
       - name: Verify headline claims (quick)
         run: python benchmarks/edge_verify.py --quick --no-write
 

@@ -18,6 +18,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -62,9 +63,24 @@ def main() -> int:
 
     port = free_port()
     server = subprocess.Popen(
-        [sys.executable, "-m", "loci.edge.ui", "--port", str(port), "--no-autosync"],
+        [
+            sys.executable,
+            "-m",
+            "loci.edge.ui",
+            "--port",
+            str(port),
+            "--no-autosync",
+            "--nodes",
+            "2",
+            "--node-interval",
+            "0.7",
+        ],  # fmt: skip
         cwd=ROOT,
-        env={**os.environ, "PYTHONPATH": str(ROOT)},
+        env={
+            **os.environ,
+            "PYTHONPATH": str(ROOT),
+            "LOCI_NODES_DIR": tempfile.mkdtemp(prefix="loci-demo-nodes-"),
+        },
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -141,7 +157,25 @@ def main() -> int:
 
             pg.goto(f"http://127.0.0.1:{port}/")
             pg.wait_for_selector("#main:not([hidden])")
-            cap("LOCI Edge: two warehouse robots on a flaky network (synthetic demo data)", 3.5)
+            cap(
+                "LOCI Edge: a robot fleet on a flaky network, built on Qdrant Edge (synthetic sensors)",
+                3.5,
+            )
+            pg.wait_for_function(
+                "document.querySelectorAll('#tabs .tag.proc').length >= 2", timeout=30000
+            )
+            show("#tabs")
+            cap(
+                "Four devices: two scripted simulators and two real OS processes, each with its own Qdrant Edge shards.",
+                4,
+            )
+            tab("robot-c")
+            show("#remotectl")
+            expect("pid" in pg.inner_text("#remote"), "process device should show its pid")
+            cap(
+                "robot-c is a separate process: its PID, RAM, CPU, disk and Qdrant call latencies are live telemetry.",
+                4,
+            )
 
             cap("1/6  Robot A patrols online. Repeats stay home; only surprise crosses the wire.")
             tab("robot-a")
@@ -223,13 +257,52 @@ def main() -> int:
             pause(2.5)
             cap("Approved by the operator: merged.", 2.5)
 
+            top()
+            show("#features")
+            n_calls = pg.inner_text("#qsub")
+            expect("calls" in n_calls, "inspector should count Qdrant calls")
+            cap(
+                "Every Qdrant Edge call is recorded as it happens: dense HNSW, BM25, filters, decay formulas, facets.",
+                4,
+            )
+            show("#ops")
+            pause(2)
+
+            cap(
+                "A real outage: robot-c's uplink drops. It keeps patrolling offline; its heartbeat goes silent.",
+                3,
+            )
+            pg.request.post(
+                f"http://127.0.0.1:{port}/api/devices/robot-c/command", data={"outage_s": 9}
+            )
+            tab("robot-c")
+            show("#remotectl")
+            pg.wait_for_function(
+                "document.querySelector('#remname').innerText.includes('no heartbeat')",
+                timeout=30000,
+            )
+            cap(
+                "Offline: no heartbeat. Its observations are safe in its own outbox on its own disk.",
+                3.5,
+            )
+            pg.wait_for_function(
+                "document.querySelector('#remname').innerText.includes('online')", timeout=40000
+            )
+            cap("Uplink back: the device syncs its backlog by itself. Nothing was lost.", 3.5)
+            tab("robot-a")
+
             txt = ask("banana submarine")
             show("#route")
             expect("ABSTAINED" in txt, f"junk question should be refused, got: {txt[:80]}")
             cap("And when nobody is confident, the robot says nothing rather than guessing.", 3.5)
+            show("#evidence")
+            expect(
+                "REAL DATA" in pg.inner_text("#evidence"),
+                "evidence panel should show real-data results",
+            )
             cap(
-                "make verify re-measures every claim: bandwidth saved, events kept, latency, privacy.",
-                3.5,
+                "Evidence, not claims: results on public human-labelled datasets and a 12-check stress test, one command each.",
+                5,
             )
 
             expect(not errors, f"console errors: {errors}")

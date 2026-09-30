@@ -417,8 +417,8 @@ function renderRemote(d) {
       meter("Queue", Object.values(ob).reduce((a, b) => a + b, 0), 50, `${Object.values(ob).reduce((a, b) => a + b, 0)} waiting`)),
     h("div", { class: "lanes" }, ...Object.entries(dec).filter(([, v]) => v).map(([k, v]) => h("span", { class: "pill", text: `${v} ${LABEL[k] || k}` }))),
     h("div", { class: "small", style: "margin:6px 0 4px" }, `Qdrant Edge on this device: ${num(d.qdrant_calls)} calls`),
-    h("table", { class: "t" }, h("tr", {}, h("th", { text: "call" }), h("th", { class: "num", text: "p50" }), h("th", { class: "num", text: "p95" })),
-      ...top.map((s) => h("tr", {}, h("td", { class: "mono", text: s.kind }), h("td", { class: "num", text: `${s.p50_ms} ms` }), h("td", { class: "num", text: `${s.p95_ms} ms` })))),
+    h("table", { class: "t" }, h("tr", {}, h("th", { text: "call" }), h("th", { class: "num", text: "p50 ms" }), h("th", { class: "num", text: "p95 ms" })),
+      ...top.map((s) => h("tr", {}, h("td", { class: "mono", text: s.kind.replace("query:", "") }), h("td", { class: "num", text: s.p50_ms }), h("td", { class: "num", text: s.p95_ms })))),
     h("div", { class: "btns", style: "margin-top:10px" }, out, spill, tb),
     h("div", { class: "small", style: "margin-top:8px" }, "Commands ride the next heartbeat. During an outage the device keeps patrolling and deciding; heartbeats stop; it syncs its backlog when the uplink returns. Kill it (even kill -9) and restart: nothing is lost."));
 }

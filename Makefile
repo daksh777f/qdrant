@@ -3,6 +3,8 @@
 #   make setup    install the package with the edge + UI extras (into the current Python env)
 #   make verify   re-measure every headline claim (about 40 s); fails if any check fails
 #   make ui       start the mission-control UI at http://127.0.0.1:8765
+#   make fleet    mission control + 2 edge devices as separate processes
+#   make eval     evaluation on public human-labelled datasets (STS-B, MSRP, SICK)
 #   make demo     run the terminal demos (offline slice, then two robots + network split)
 #   make test     run the test suite (add BACKEND=edge to run it on Qdrant Edge)
 #   make record   re-record docs/assets/edge-demo.webm from the scripted UI walkthrough
@@ -16,7 +18,7 @@
 
 PY ?= python
 
-.PHONY: setup verify verify-quick ui demo test record qdrant-up qdrant-down verify-server ui-server test-server
+.PHONY: setup verify verify-quick ui fleet eval demo test record qdrant-up qdrant-down verify-server ui-server test-server
 
 QDRANT_URL ?= http://localhost:6333
 
@@ -31,6 +33,12 @@ verify-quick:
 
 ui:
 	$(PY) -m loci.edge.ui
+
+fleet:
+	$(PY) -m loci.edge.ui --nodes 2
+
+eval:
+	$(PY) benchmarks/edge_real_eval.py
 
 demo:
 	$(PY) examples/edge_p0_slice.py
