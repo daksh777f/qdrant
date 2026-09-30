@@ -1,12 +1,15 @@
 """A two-robot warehouse fleet for the demo UI.
 
 SYNTHETIC: the robot's "camera" is simulated (landmark text + a little noise
-run through :class:`HashEmbedder`) and the cloud is a :class:`LocalCloud`.
+run through :class:`HashEmbedder`) and the cloud is a local stand-in, or a Qdrant Server
+when ``LOCI_QDRANT_URL`` is set.
 The Edge shards, sync policy, outbox, sync and diff are the real engine.
 """
 
 from __future__ import annotations
 
+import contextlib
+import os
 import tempfile
 import threading
 import time
@@ -17,8 +20,9 @@ from typing import Any
 
 import numpy as np
 
-from loci.edge.cloud import Link, LinkedCloud, LocalCloud
+from loci.edge.cloud import Link, LinkedCloud
 from loci.edge.cloud_ai import CloudBrain, LLMClient
+from loci.edge.cloud_server import QdrantServerCloud, open_cloud
 from loci.edge.conflicts import ConflictLog, Reconciler
 from loci.edge.decisions import Decision, DecisionLog
 from loci.edge.embed import HashEmbedder
@@ -68,7 +72,12 @@ class Fleet:
         self.embedder = HashEmbedder(dim)
         self.rng = np.random.default_rng(seed)
         self.lock = threading.RLock()
-        self.cloud = LocalCloud(self.dir / "cloud", dim)
+        env = dict(os.environ)
+        self._own_collection = "LOCI_QDRANT_COLLECTION" not in env
+        # A server keeps its data across runs, but the robots here are fresh: use a fresh collection
+        # (dropped on close) unless the operator named one.
+        env.setdefault("LOCI_QDRANT_COLLECTION", f"loci_edge_demo_{int(time.time() * 1000)}")
+        self.cloud, self.cloud_kind = open_cloud(self.dir / "cloud", dim, env)
         # Cloud-side processes: conflict reconciler and the fleet-briefing brain.
         self.conflicts = ConflictLog(self.dir / "conflicts.db")
         self.reconciler = Reconciler(self.cloud, self.conflicts)
@@ -529,6 +538,7 @@ class Fleet:
                 "conflict_counts": self.conflicts.counts(),
                 "insights": insights,
                 "roles": roles,
+                "cloud_kind": self.cloud_kind,
                 "llm": (
                     {"enabled": True, "provider": self.llm.provider, "model": self.llm.model}
                     if self.llm
@@ -593,6 +603,9 @@ class Fleet:
                 n.outbox.close()
                 n.log.close()
             self.conflicts.close()
+            if self._own_collection and isinstance(self.cloud, QdrantServerCloud):
+                with contextlib.suppress(Exception):  # the server may already be gone
+                    self.cloud.drop()
             self.cloud.close()
         if self._tmp is not None:
             self._tmp.cleanup()

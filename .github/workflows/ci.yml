@@ -54,6 +54,11 @@ jobs:
       - name: Verify headline claims (quick)
         run: python benchmarks/edge_verify.py --quick --no-write
 
+      # Same harness with the cloud served through qdrant-client (in-process engine). A live
+      # Qdrant Server is not started here; see `make verify-server` for that.
+      - name: Verify headline claims through the Qdrant client path
+        run: LOCI_QDRANT_URL=":memory:" python benchmarks/edge_verify.py --quick --no-write
+
   # The cloud API imports the whole loci/ package, so its suite must run on
   # every change — not only when cloud/ paths change (see cloud-api.yml).
   cloud-tests:

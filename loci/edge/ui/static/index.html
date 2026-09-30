@@ -311,6 +311,7 @@ function renderCloud(c) {
   const roles = Object.entries(c.roles).map(([k, v]) => `${v} ${k}`).join(" · ");
   head.replaceChildren(
     h("span", { class: "chip", text: c.llm.enabled ? `LLM briefings: ${c.llm.provider} / ${c.llm.model}` : "LLM off — deterministic briefings (set GROQ_API_KEY, CEREBRAS_API_KEY or GEMINI_API_KEY)" }),
+    h("span", { class: "chip", text: `cloud: ${c.cloud_kind}` }),
     h("span", { class: "chip", text: `cloud memories: ${roles || "none"}` }),
     h("span", { class: "chip", text: `pending review: ${c.conflict_counts.pending_review || 0}` }));
   const inbox = $("inbox");
