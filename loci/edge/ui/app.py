@@ -15,6 +15,42 @@ from loci.edge.cloud_http import cloud_router
 from loci.edge.sim import Fleet
 
 STATIC = Path(__file__).parent / "static"
+RESULTS = Path(__file__).resolve().parents[3] / "benchmarks" / "results"
+
+
+def _evidence() -> dict:
+    """Measured results from the benchmark files, each labelled with where its data came from.
+
+    Nothing is computed or typed in here: if a results file is missing, the UI says so.
+    """
+    import json
+
+    def load(name: str) -> dict | None:
+        p = RESULTS / name
+        return json.loads(p.read_text()) if p.exists() else None
+
+    verify = load("edge_verify.json")
+    real = load("edge_real_eval.json") or load("edge_real_eval_standin.json")
+    out: dict = {"available": verify is not None or real is not None}
+    if verify:
+        out["verify"] = {
+            "provenance": "synthetic, seeded data (benchmarks/edge_verify.py)",
+            "checks": verify["checks"],
+            "latency": verify["latency"]["latency_ms"],
+        }
+    if real:
+        out["real"] = {
+            "provenance": "public human-labelled datasets: STS-B, MSRP, SICK "
+            "(benchmarks/edge_real_eval.py)",
+            "embedder": real["embedder"],
+            "embedder_real": real["embedder_real"],
+            "retrieval": real["retrieval"]["modes"],
+            "corpus": real["retrieval"]["corpus_sentences"],
+            "queries": real["retrieval"]["retrieval_queries"],
+            "gate": real["gate"],
+            "dedupe": real["dedupe"],
+        }
+    return out
 
 
 class LinkBody(BaseModel):
@@ -139,8 +175,20 @@ def create_app(fleet: Fleet | None = None, *, autosync: bool = True) -> FastAPI:
         name: str,
         q: str = Query(..., min_length=1, max_length=200),
         history: bool = False,
+        recent_half_life_s: float | None = Query(None, gt=0, le=86_400),
+        diverse: bool = False,
     ) -> dict:
-        return fleet.ask(robot(name), q, history=history)
+        return fleet.ask(
+            robot(name), q, history=history, recent_half_life_s=recent_half_life_s, diverse=diverse
+        )
+
+    @app.get("/api/overview")
+    def overview() -> dict:
+        return fleet.overview()
+
+    @app.get("/api/evidence")
+    def evidence() -> dict:
+        return _evidence()
 
     @app.post("/api/robots/{name}/private")
     def private(name: str) -> dict:

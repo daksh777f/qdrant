@@ -68,10 +68,64 @@ def describe_query(req: Any) -> str:
     return " + ".join(parts)
 
 
+_LABELS: dict[int, tuple[str, int]] = {}
+
+
+class _LabelledUpdateOperation:
+    """Drop-in for ``qdrant_edge.UpdateOperation`` that remembers what each operation is.
+
+    Edge's update objects are opaque (no useful repr), so the kind and size are recorded when
+    the operation is built and read back when the instrumented shard applies it.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        import qdrant_edge as qe
+
+        factory = getattr(qe.UpdateOperation, name)
+
+        def make(*args: Any, **kwargs: Any) -> Any:
+            op = factory(*args, **kwargs)
+            n = len(args[0]) if args and isinstance(args[0], list) else 1
+            if len(_LABELS) > 10_000:  # never grows without bound if an op is built but not applied
+                _LABELS.clear()
+            _LABELS[id(op)] = (name, n)
+            return op
+
+        return make
+
+
+UpdateOps = _LabelledUpdateOperation()
+
+
 def describe_update(op: Any) -> tuple[str, int]:
-    text = repr(op)
-    kind = text.split("(", 1)[0] if "(" in text else type(op).__name__
-    return kind, text.count("Point(") or 1
+    return _LABELS.pop(id(op), ("update", 1))
+
+
+def _features(op: Op) -> list[str]:
+    """Which Qdrant capabilities a recorded call exercised (read from the call itself)."""
+    d, out = op.detail, []
+    if op.op == "query":
+        if "nearest(dense)" in d:
+            out.append("dense_hnsw")
+        if "nearest(bm25)" in d:
+            out.append("sparse_bm25")
+        if "filter[" in d:
+            out.append("payload_filter")
+        if "formula" in d:
+            out.append("decay_formula")
+        if "MMR" in d:
+            out.append("mmr")
+        if "quantized" in d:
+            out.append("quantization")
+    elif op.op == "facet":
+        out.append("facets")
+    elif op.op == "update":
+        out.append("upsert" if d == "upsert_points" else "payload_update")
+    elif op.op in {"scroll", "retrieve", "count"}:
+        out.append(op.op)
+    elif op.shard == "qdrant-server":
+        out.append("qdrant_server")
+    return out
 
 
 class OpsLog:
@@ -81,6 +135,7 @@ class OpsLog:
         self._ops: deque[Op] = deque(maxlen=capacity)
         self._lat: dict[str, deque[int]] = {}
         self._count: dict[str, int] = {}
+        self.features: dict[str, int] = {}
         self._samples = samples_per_kind
         self._lock = threading.Lock()
 
@@ -90,6 +145,8 @@ class OpsLog:
             self._ops.append(op)
             self._count[key] = self._count.get(key, 0) + 1
             self._lat.setdefault(key, deque(maxlen=self._samples)).append(op.us)
+            for feature in _features(op):
+                self.features[feature] = self.features.get(feature, 0) + 1
 
     def recent(self, limit: int = 50, device: str | None = None) -> list[dict]:
         with self._lock:

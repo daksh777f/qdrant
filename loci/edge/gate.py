@@ -110,8 +110,17 @@ class AnswerGate:
         self.cfg = cfg or GateConfig()
 
     def ask(
-        self, text: str, limit: int = 5, now_ms: int | None = None, *, current_only: bool = True
+        self,
+        text: str,
+        limit: int = 5,
+        now_ms: int | None = None,
+        *,
+        current_only: bool = True,
+        recency_half_life_ms: int | None = None,
+        diverse: bool = False,
     ) -> Answer:
+        """Confidence is always plain similarity; ``recency_half_life_ms`` / ``diverse`` only
+        change how the answer's hits are ranked (Qdrant decay formula / MMR, on the device)."""
         t0 = time.perf_counter()
         now = now_ms if now_ms is not None else int(time.time() * 1000)
         cfg = self.cfg
@@ -127,7 +136,15 @@ class AnswerGate:
             cfg,
         )
         thresholds = {"answer_threshold": cfg.answer_threshold}
-        hybrid = self.store.search(vector=vec, text=text, limit=limit, current_only=current_only)
+        hybrid = self.store.search(
+            vector=vec,
+            text=text,
+            limit=limit,
+            current_only=current_only,
+            recency_half_life_ms=recency_half_life_ms,
+            now_ms=now,
+            diverse=diverse,
+        )
         local_hits = [_hit(h.id, h.score, h.payload, h.source) for h in hybrid]
 
         def done(route, hits, reason, **kw) -> Answer:

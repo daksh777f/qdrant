@@ -1,8 +1,8 @@
 """A two-robot warehouse fleet for the demo UI.
 
 SYNTHETIC: the robot's "camera" is simulated (landmark text + a little noise
-run through :class:`HashEmbedder`) and the cloud is a local stand-in, or a Qdrant Server
-when ``LOCI_QDRANT_URL`` is set.
+run through the embedder set by ``LOCI_EMBEDDER``, default a hashed stand-in). The cloud is a
+local stand-in, or a Qdrant Server when ``LOCI_QDRANT_URL`` is set.
 The Edge shards, sync policy, outbox, sync and diff are the real engine.
 """
 
@@ -26,7 +26,7 @@ from loci.edge.cloud_ai import CloudBrain, LLMClient
 from loci.edge.cloud_server import QdrantServerCloud, open_cloud
 from loci.edge.conflicts import ConflictLog, Reconciler
 from loci.edge.decisions import Decision, DecisionLog
-from loci.edge.embed import HashEmbedder
+from loci.edge.embed import make_embedder
 from loci.edge.gate import AnswerGate
 from loci.edge.outbox import Outbox
 from loci.edge.qdrant_ops import OpsLog
@@ -64,14 +64,21 @@ class Node:
 class Fleet:
     """Owns the robots, the cloud, a bytes ledger and an activity feed."""
 
-    def __init__(self, data_dir: str | Path | None = None, dim: int = 64, seed: int = 7) -> None:
+    def __init__(
+        self,
+        data_dir: str | Path | None = None,
+        dim: int = 64,
+        seed: int = 7,
+        embedder: str | None = None,
+    ) -> None:
         self._tmp = None
         if data_dir is None:
             self._tmp = tempfile.TemporaryDirectory(prefix="loci-fleet-")
             data_dir = self._tmp.name
         self.dir = Path(data_dir)
-        self.dim = dim
-        self.embedder = HashEmbedder(dim)
+        spec = embedder or os.environ.get("LOCI_EMBEDDER", f"hash:{dim}")
+        self.embedder, self.embedder_note = make_embedder(spec, hash_dim=dim)
+        self.dim = self.embedder.dim
         self.rng = np.random.default_rng(seed)
         self.lock = threading.RLock()
         env = dict(os.environ)
@@ -399,10 +406,61 @@ class Fleet:
                     "cloud": self.cloud_kind,
                 },
                 "total_calls": self.ops.total_calls(),
+                "features": dict(self.ops.features),
                 "stats": self.ops.stats(),
                 "recent": self.ops.recent(80),
                 "devices": devices,
             }
+
+    def overview(self) -> dict:
+        """Fleet-level KPIs for the header, all computed from live state."""
+        now = time.time()
+        with self.lock:
+            remote = self.remote_view()
+            online = sum(n.link.up for n in self.nodes.values()) + sum(r["online"] for r in remote)
+            on_device = sum(n.store.count(include_mirror=True) for n in self.nodes.values()) + sum(
+                (r.get("footprint") or {}).get("points_local", 0)
+                + (r.get("footprint") or {}).get("points_mirror", 0)
+                for r in remote
+            )
+            recent = self.ops.recent(600)
+            window = [o for o in recent if now * 1000 - o["ts_ms"] <= 10_000]
+            searches = [o["us"] / 1000 for o in recent if o["op"] == "query"][:200]
+            try:
+                cloud_count = self.cloud.count()
+            except Exception:
+                cloud_count = -1
+            return {
+                "devices_total": len(self.nodes) + len(remote),
+                "devices_online": online,
+                "memories_on_devices": on_device,
+                "cloud_memories": cloud_count,
+                "qdrant_calls_per_s": round(len(window) / 10, 1),
+                "qdrant_calls_total": self.ops.total_calls(),
+                "search_p95_ms": round(float(np.percentile(searches, 95)), 2) if searches else None,
+                "bytes": self._bytes_view(),
+                "embedder": self.embedder.name,
+                "embedder_real": bool(getattr(self.embedder, "real", False)),
+                "cloud_kind": self.cloud_kind,
+            }
+
+    def device_positions(self) -> list[dict]:
+        out = []
+        with self.lock:
+            for name, n in self.nodes.items():
+                last = n.log.recent(limit=1)
+                if last and last[0].x is not None:
+                    out.append(
+                        {"name": name, "x": last[0].x, "y": last[0].y, "remote": False,
+                         "online": n.link.up}
+                    )  # fmt: skip
+        for r in self.remote_view():
+            if r.get("pos"):
+                out.append(
+                    {"name": r["name"], "x": r["pos"][0], "y": r["pos"][1], "remote": True,
+                     "online": r["online"]}
+                )  # fmt: skip
+        return out
 
     def remote_view(self) -> list[dict]:
         now = time.time()
@@ -596,12 +654,25 @@ class Fleet:
                 ],
             }
 
-    def ask(self, name: str, text: str, *, history: bool = False) -> dict:
+    def ask(
+        self,
+        name: str,
+        text: str,
+        *,
+        history: bool = False,
+        recent_half_life_s: float | None = None,
+        diverse: bool = False,
+    ) -> dict:
         """Gated question answering: local, escalate to cloud, low-confidence, or abstain."""
         with self.lock:
             n = self.node(name)
             assert n.gate is not None  # every node is built with a gate
-            ans = n.gate.ask(text, current_only=not history)
+            ans = n.gate.ask(
+                text,
+                current_only=not history,
+                recency_half_life_ms=int(recent_half_life_s * 1000) if recent_half_life_s else None,
+                diverse=diverse,
+            )
             d = ans.to_dict()
             d["online"] = n.link.up
             if d["route"] == "ESCALATE_CLOUD":
@@ -683,6 +754,7 @@ class Fleet:
                     for (ix, iy), c in cells.items()
                 ],
                 "points": points,
+                "devices": self.device_positions(),
                 "mirror": mirror,
                 "landmarks": [
                     {"name": nm, "text": t, "x": x, "y": y} for nm, t, (x, y) in LANDMARKS
