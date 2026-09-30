@@ -56,6 +56,34 @@ def wire_bytes(point: dict) -> int:
     return len(body.encode()) + 4 * len(point["vector"])
 
 
+def plan_upsert(points: list[dict], existing: dict[str, dict]) -> tuple[list[dict], int]:
+    """The cloud's write rules, shared by every backend so they cannot drift apart.
+
+    * a re-push of a version the cloud already holds (or an older one) is ignored (idempotent);
+    * a newer version of a point that carried a role verdict drops that verdict (the reconciler
+      will re-judge it) and bumps ``rrev`` so devices notice;
+    * accepted points are marked ``sync_state="synced"``.
+
+    Returns ``(points_to_write, bytes_received)``.
+    """
+    out, received = [], 0
+    for p in points:
+        old = existing.get(p["id"])
+        if old is not None and int(old.get("version", 0)) >= int(p["payload"].get("version", 0)):
+            continue
+        old_rrev = int(old.get("rrev", 0)) if old is not None else 0
+        rrev = old_rrev + 1 if old is not None and old.get("role") else old_rrev
+        out.append(
+            {
+                "id": p["id"],
+                "vector": p["vector"],
+                "payload": dict(p["payload"], sync_state="synced", rrev=rrev),
+            }
+        )
+        received += wire_bytes(p)
+    return out, received
+
+
 class CloudStore(Protocol):
     """What the sync engine needs from the cloud."""
 
@@ -123,6 +151,23 @@ class LinkedCloud:
         return self._cloud.get(ids)
 
 
+class CloudAdmin(CloudStore, Protocol):
+    """What the cloud-side processes need on top of the device interface.
+
+    Devices never see these: the reconciler and the briefing writer run where the cloud runs.
+    """
+
+    def scan(self) -> list[dict]:
+        """Every point as ``{id, vector, payload}``."""
+        ...
+
+    def apply_roles(self, updates: dict[str, dict]) -> int:
+        """Write reconciler verdicts and bump each point's role revision."""
+        ...
+
+    def close(self) -> None: ...
+
+
 class LocalCloud:
     """Cloud stand-in backed by an Edge shard; needs no server or Docker."""
 
@@ -138,6 +183,7 @@ class LocalCloud:
         else:
             self._shard = qe.EdgeShard.create(str(self._path), cfg)
         self.bytes_received = 0
+        self.kind = "local stand-in"
 
     def upsert(self, points: list[dict]) -> int:
         """Store points; a re-push of an already-held version is a no-op (idempotent).
@@ -152,26 +198,13 @@ class LocalCloud:
                 _ids([p["id"] for p in points]), with_payload=True, with_vector=False
             )
         }
-        ops = []
-        received = 0
-        for p in points:
-            old = existing.get(p["id"])
-            if old is not None and int(old.get("version", 0)) >= int(
-                p["payload"].get("version", 0)
-            ):
-                continue  # already have this (or a newer) version
-            old_rrev = int(old.get("rrev", 0)) if old is not None else 0
-            rrev = old_rrev + 1 if old is not None and old.get("role") else old_rrev
-            ops.append(
-                qe.Point(
-                    p["id"],
-                    {"dense": p["vector"]},
-                    dict(p["payload"], sync_state="synced", rrev=rrev),
+        to_write, received = plan_upsert(points, existing)
+        if to_write:
+            self._shard.update(
+                qe.UpdateOperation.upsert_points(
+                    [qe.Point(w["id"], {"dense": w["vector"]}, w["payload"]) for w in to_write]
                 )
             )
-            received += wire_bytes(p)
-        if ops:
-            self._shard.update(qe.UpdateOperation.upsert_points(ops))
         self.bytes_received += received
         return received
 

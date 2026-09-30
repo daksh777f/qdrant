@@ -7,6 +7,7 @@ backoff). Requires the optional ``qdrant-edge-py`` package.
 """
 
 from loci.edge.cloud import CloudStore, Link, LinkDown, LinkedCloud, LocalCloud
+from loci.edge.cloud_server import QdrantServerCloud, open_cloud
 from loci.edge.decisions import Decision, DecisionLog
 from loci.edge.ids import content_hash, memory_id
 from loci.edge.outbox import Outbox
@@ -27,6 +28,7 @@ __all__ = [
     "Outbox",
     "PolicyConfig",
     "PullReport",
+    "QdrantServerCloud",
     "PushReport",
     "SearchHit",
     "SummaryReport",
@@ -34,5 +36,6 @@ __all__ = [
     "SyncPolicy",
     "SyncEngine",
     "content_hash",
+    "open_cloud",
     "memory_id",
 ]

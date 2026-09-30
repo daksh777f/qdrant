@@ -22,9 +22,11 @@ policy, the sync and the measurements are real."**
 
 ## Questions you will probably get
 
-* **"Is this using a real Qdrant Server?"** Not yet. Sync targets a local stand-in behind a small
-  `CloudStore` interface, because a server is not guaranteed at the venue. A server client and
-  partial-snapshot pull are the known next step; say so plainly.
+* **"Is this using a real Qdrant Server?"** The default demo uses a local stand-in, because a
+  server is not guaranteed at the venue. There is a full `QdrantServerCloud` (`LOCI_QDRANT_URL=...`,
+  `make ui-server`) whose logic is tested against qdrant-client's in-process engine and a fake HTTP
+  server, and the UI's "cloud:" chip shows which one is live. If you have Docker at the venue, run
+  `make qdrant-up ui-server`. Say plainly that it has not been run against a live server by us.
 * **"Is the data real?"** No. Seeded synthetic vectors and a hashed bag-of-words embedder. The
   verification harness is how to re-measure with a real model.
 * **"Why not just dedupe by similarity?"** Two visually similar objects in different places, or one

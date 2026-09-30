@@ -67,8 +67,9 @@ make ui        # mission control at http://127.0.0.1:8765
 
 Read the [platform guide](docs/EDGE_PLATFORM.md) (goal-by-goal mapping, design, **known
 limitations**), the [3-minute demo script](docs/DEMO_SCRIPT.md), or watch the
-[90-second recording](docs/assets/edge-demo.webm). Honest status: the cloud side is a local
-stand-in behind a small interface; a real Qdrant Server client is the next step.
+[90-second recording](docs/assets/edge-demo.webm). Honest status: the default cloud is a local
+stand-in; a `QdrantServerCloud` client (`LOCI_QDRANT_URL`, `make ui-server`) is built and tested against
+qdrant-client's in-process engine, but not yet against a live server.
 
 The rest of this README covers the underlying LOCI spatiotemporal memory engine.
 

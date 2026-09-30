@@ -35,7 +35,7 @@ end-to-end check of the UI story.
 | Searchable semantic memory on the device | `EdgeMemoryStore`: a Qdrant Edge shard with dense + BM25 vectors, Hilbert-bucket integer indexes, provenance on every record | `tests/test_edge_p0.py`; the whole existing suite also passes on Edge (`make test BACKEND=edge`) |
 | Low-latency vector and hybrid search offline | dense + BM25 with RRF over the writable shard and the fleet mirror | p95 2.1 ms hybrid, 1.3 ms dense at 5,000 x 384-d; recall@10 = 1.0 vs exact search |
 | Decide what stays local and what syncs | `SyncPolicy`: private / urgent / duplicate / moved / new / ambiguous, each verdict stored with its evidence | decision feed in the UI; `tests/test_edge_p2.py` |
-| Sync with the server when connectivity returns | durable SQLite `Outbox` (backoff + jitter, survives restarts), idempotent push, delta pull | two robots converge in about 0.3 s after a 150-observation outage |
+| Sync with the server when connectivity returns | durable SQLite `Outbox` (backoff + jitter, survives restarts), idempotent push, delta pull, to a local stand-in **or a Qdrant Server** (`QdrantServerCloud`) | two robots converge in about 0.3 s after a 150-observation outage; identical results on both clouds |
 | Intermittent connectivity | every read and write is local; pushes queue and retry; `Link` switch simulates cuts | "Cut the network" button; netsplit tests |
 | Evolving and conflicting memory | place-and-time reconciler (merge, moved, needs-review), audit log, operator inbox, versioned records | 80/80 labelled pairs correct; `tests/test_edge_conflicts.py` |
 | User-facing inspection | mission-control web UI: map, decisions, sync diff, search with confidence, conflict inbox, activity | `make ui`; browser-tested |
@@ -90,6 +90,41 @@ Full tables: [`benchmarks/results/edge_verify.md`](../benchmarks/results/edge_ve
 sends 12.5% of bytes and keeps 95% of events, against 14.7% and 100% by default. Two percentage
 points of bandwidth are not worth silently losing real events, so recall-first is the default.
 
+## Running against a real Qdrant Server
+
+```bash
+make qdrant-up                  # docker run qdrant/qdrant on :6333
+make verify-server              # the whole harness with Qdrant Server as the cloud
+make ui-server                  # mission control on it; the "cloud:" chip shows which cloud is live
+make test-server                # the cloud contract suite against the live server
+```
+
+or set `LOCI_QDRANT_URL` (plus `LOCI_QDRANT_API_KEY` for a secured server or Qdrant Cloud, and
+`LOCI_QDRANT_COLLECTION` to name the collection) for any of the commands above. If a URL is set but
+the server is unreachable, the demo falls back to the local stand-in **and says so** in the UI.
+
+`QdrantServerCloud` (`loci/edge/cloud_server.py`) implements the same cloud contract as the local
+stand-in on one collection, using `qdrant-client` >= 1.10. A refused connection, timeout or
+502/503/504/429 is raised as `LinkDown`, so a server outage is indistinguishable from a network cut
+to the robot: the outbox keeps everything and retries. Other errors (a wrong API key, say) are
+not disguised as outages.
+
+**What has and has not been verified.** No Docker daemon or Qdrant binary was available while this
+was built, so it has *not* been run against a live server here. What has been done:
+
+* one contract suite (`tests/test_edge_cloud_contract.py`) runs against both cloud backends, and
+  they share a single implementation of the write rules (`plan_upsert`), so they cannot drift;
+* the whole platform runs on the client path: the 12-check harness and the full UI story pass with
+  `LOCI_QDRANT_URL=":memory:"` (qdrant-client's in-process engine, same API surface) with results
+  identical to the local stand-in;
+* the real HTTP error paths are tested (connection refused, and a fake server answering 503 and 401);
+* the same contract suite runs against a live server when `LOCI_TEST_QDRANT_URL` is set. **That is
+  the check still owed:** run `make qdrant-up test-server verify-server` once on a machine with Docker.
+
+Not implemented: Qdrant Edge's snapshot-based shard sync (`update_from_snapshot`). Devices pull a
+version-based delta instead, which works with any cloud but moves per-point data rather than
+segment files.
+
 ## Configuration
 
 * `PolicyConfig`: `dedupe_similarity` (0.95), `same_place_radius` (0.05), `ambiguous_similarity`
@@ -106,15 +141,14 @@ Real: the Qdrant Edge shards, hybrid search, Hilbert indexes, the SQLite outbox 
 sync policy, the reconciler, the gate, the UI, the tests and the measurements.
 
 Simulated: the robots' "cameras" (seeded noisy vectors), the network (a `Link` switch), and the
-cloud (`LocalCloud`, a second Edge shard behind the `CloudStore` interface). The default text
+cloud by default (`LocalCloud`, a second Edge shard behind the `CloudStore` interface; a Qdrant Server
+is one environment variable away). The default text
 embedder is a hashed bag-of-words stand-in so the demo needs no model download.
 
 ## Known limitations
 
-* **No real Qdrant Server yet.** Sync targets `LocalCloud`. The `CloudStore` interface is small
-  (upsert, index, get, search, scan, apply roles), but a `QdrantServerCloud` client and
-  partial-snapshot pull have not been written or run against a server. This is the largest gap
-  against the problem statement's wording.
+* **Not yet run against a live Qdrant Server.** The client exists and is tested as described above, but
+  the HTTP path against a real server (and snapshot-based sync) is unverified. See the section above.
 * **LLM path verified only against a local fake server**, not a live provider. Model names change;
   override with `LOCI_LLM_MODEL`.
 * **Same-place look-alikes are intrinsically ambiguous.** The default sends them so the cloud can

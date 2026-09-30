@@ -68,9 +68,11 @@ mcp = [
 ]
 edge = [
     "qdrant-edge-py>=0.8.0",
+    "qdrant-client>=1.10",  # QdrantServerCloud uses query_points
 ]
 edge-ui = [
     "qdrant-edge-py>=0.8.0",
+    "qdrant-client>=1.10",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
 ]

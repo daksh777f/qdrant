@@ -28,11 +28,14 @@ What is measured, and how it can mislead (read this before quoting a number):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
+import os
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -47,13 +50,13 @@ from loci.edge import (  # noqa: E402
     EdgeMemoryStore,
     Link,
     LinkedCloud,
-    LocalCloud,
     Memory,
     Outbox,
     PolicyConfig,
     SyncEngine,
     SyncPolicy,
 )
+from loci.edge.cloud_server import QdrantServerCloud, open_cloud  # noqa: E402
 from loci.edge.conflicts import ConflictLog, Reconciler  # noqa: E402
 from loci.edge.embed import HashEmbedder  # noqa: E402
 from loci.edge.gate import ANSWER_LOCAL, AnswerGate, GateConfig  # noqa: E402
@@ -63,6 +66,22 @@ RESULTS = Path(__file__).parent / "results"
 THRESHOLDS_FULL = [0.99, 0.97, 0.95, 0.92, 0.90, 0.85, 0.80, 0.70]
 THRESHOLDS_QUICK = [0.97, 0.95, 0.90, 0.80]
 DEFAULT_THRESHOLD = 0.95
+
+
+def make_cloud(tmp: Path):
+    """The cloud under test. ``LOCI_QDRANT_URL`` (a server URL, or ``:memory:``) runs the whole
+    harness against Qdrant Server; each call gets its own throw-away collection."""
+    env = dict(os.environ)
+    env["LOCI_QDRANT_COLLECTION"] = f"loci_verify_{uuid.uuid4().hex[:10]}"
+    cloud, _ = open_cloud(tmp / "cloud", DIM, env)
+    return cloud
+
+
+def close_cloud(cloud) -> None:
+    if isinstance(cloud, QdrantServerCloud):
+        with contextlib.suppress(Exception):  # best effort: drop the throw-away collection
+            cloud.drop()
+    cloud.close()
 
 
 def unit(v: np.ndarray) -> np.ndarray:
@@ -156,12 +175,12 @@ def event_recall(cloud_points: list[dict], events: dict) -> float:
 
 
 class Rig:
-    """One robot + a LocalCloud in a temp dir."""
+    """One robot + the cloud under test in a temp dir."""
 
     def __init__(self, policy: SyncPolicy | None = None, name: str = "robot"):
         self.tmp = Path(tempfile.mkdtemp(prefix="loci-verify-"))
         self.link = Link(True)
-        self.cloud = LocalCloud(self.tmp / "cloud", DIM)
+        self.cloud = make_cloud(self.tmp)
         self.store = EdgeMemoryStore(self.tmp / name, DIM, name, mirror_path=self.tmp / f"{name}-m")
         self.outbox = Outbox(self.tmp / f"{name}.db")
         self.log = DecisionLog(self.tmp / f"{name}-d.db")
@@ -173,7 +192,7 @@ class Rig:
         self.store.close()
         self.outbox.close()
         self.log.close()
-        self.cloud.close()
+        close_cloud(self.cloud)
 
 
 def run_arm(kind: str, threshold: float, events, obs, **cfg_extra) -> dict:
@@ -271,7 +290,7 @@ def negative_controls(n: int = 300) -> dict:
 
 def convergence(m: int = 150) -> dict:
     tmp = Path(tempfile.mkdtemp(prefix="loci-conv-"))
-    cloud = LocalCloud(tmp / "cloud", DIM)
+    cloud = make_cloud(tmp)
     rec = Reconciler(cloud, ConflictLog(tmp / "c.db"))
     robots = {}
     rng = np.random.default_rng(5)
@@ -318,13 +337,13 @@ def convergence(m: int = 150) -> dict:
     for _, store, eng in robots.values():
         store.close()
         eng.outbox.close()
-    cloud.close()
+    close_cloud(cloud)
     return out
 
 
 def conflict_accuracy(n_each: int = 20) -> dict:
     tmp = Path(tempfile.mkdtemp(prefix="loci-conf-"))
-    cloud = LocalCloud(tmp / "cloud", DIM)
+    cloud = make_cloud(tmp)
     log = ConflictLog(tmp / "c.db")
     rng = np.random.default_rng(3)
     ids: dict[str, list[tuple[str, str]]] = {
@@ -392,7 +411,7 @@ def conflict_accuracy(n_each: int = 20) -> dict:
         res[kind] = {"correct": good, "total": len(pairs)}
     res["errors"] = sum(v["total"] - v["correct"] for v in res.values() if isinstance(v, dict))
     log.close()
-    cloud.close()
+    close_cloud(cloud)
     return res
 
 
