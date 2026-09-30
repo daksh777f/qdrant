@@ -29,6 +29,39 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
+  # Qdrant Edge is an optional extra, so the default `test` job skips its suites. This job
+  # installs it and runs (1) the edge suites, (2) the entire suite on the Edge backend and
+  # (3) the quick claim-verification harness, which exits non-zero if any headline claim fails.
+  edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,edge-ui]"
+
+      - name: Edge suites
+        run: pytest tests/test_edge_*.py tests/test_local_client_edge.py -v --tb=short
+
+      - name: Whole suite on the Edge backend
+        run: LOCI_TEST_BACKEND=edge pytest tests/ -q --tb=short
+
+      - name: Real-data evaluation (public datasets, stand-in embedder)
+        run: python benchmarks/edge_real_eval.py --embedder hash --queries 300 --no-write
+
+      - name: Verify headline claims (quick)
+        run: python benchmarks/edge_verify.py --quick --no-write
+
+      # Same harness with the cloud served through qdrant-client (in-process engine). A live
+      # Qdrant Server is not started here; see `make verify-server` for that.
+      - name: Verify headline claims through the Qdrant client path
+        run: LOCI_QDRANT_URL=":memory:" python benchmarks/edge_verify.py --quick --no-write
+
   # The cloud API imports the whole loci/ package, so its suite must run on
   # every change — not only when cloud/ paths change (see cloud-api.yml).
   cloud-tests:

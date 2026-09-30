@@ -33,6 +33,44 @@
 
 ---
 
+## New: LOCI Edge, an offline-first memory and intelligence platform (Qdrant Edge)
+
+> **A robot's memory is a place and a moment, so deciding what to send, what is a duplicate and
+> what is a conflict are geometric questions. Only surprise crosses the wire.**
+
+Every robot keeps its own searchable [Qdrant Edge](https://qdrant.tech/edge/) shards, works fully
+offline, decides on the device what is worth syncing, and gets fleet knowledge pushed back down.
+Devices run as **separate processes** (or machines) syncing over HTTP to a cloud that can be a
+**Qdrant Server**. A live inspector shows every Qdrant call the fleet makes.
+
+<p align="center">
+  <img src="docs/assets/edge-mission-control.png" alt="Mission control: fleet with process devices, map, Qdrant Edge inspector" width="95%">
+</p>
+
+```bash
+make setup     # no Docker, no Qdrant Server, no API key
+make fleet     # mission control + 2 edge-device processes at http://127.0.0.1:8765
+make verify    # 12 checks on synthetic ground truth, fails loudly
+make eval      # public human-labelled datasets (STS-B, MSRP, SICK), SHA-256 pinned
+```
+
+| Measured | Result | Data |
+|:--|:--|:--|
+| Paraphrase retrieval on Qdrant Edge, 495 queries among 9,225 real sentences | hybrid recall@10 **0.988**, BM25 p95 1.3 ms | real, public |
+| Answer gate: answerable vs unanswerable questions | ROC-AUC 0.894 (answers 12% of unanswerable: reported, not hidden) | real, public |
+| Bytes sent vs sending everything / events kept | **14.7%** / **100%** (place-blind dedupe: 88%) | synthetic ground truth |
+| Device process crash (`kill -9`) mid-outage | restart, backlog delivered, nothing lost | end-to-end test |
+| Conflict engine on labelled pairs | 80 / 80 | synthetic ground truth |
+
+Semantic numbers above use a labelled hashed stand-in embedder; set `LOCI_EMBEDDER=fastembed` for a
+real model. Read the [platform guide](docs/EDGE_PLATFORM.md) (goal-by-goal mapping, Qdrant features,
+data honesty, **known limitations**), the [demo script](docs/DEMO_SCRIPT.md), or watch the
+[2-minute recording](docs/assets/edge-demo.webm).
+
+The rest of this README covers the underlying LOCI spatiotemporal memory engine.
+
+---
+
 ## Why LOCI?
 
 Physical AI runs on memory. A robot that forgets where it saw the pallet, a

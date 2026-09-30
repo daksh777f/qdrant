@@ -98,6 +98,9 @@ class LocalLociClient:
             retention.  Note: a retention policy tighter than the raw
             window (fewer than ``raw_window_epochs + 1`` epochs retained)
             purges raw points before consolidation can fold them.
+        store: Optional storage backend with the ``MemoryStore`` interface
+            (e.g. :class:`loci.backends.edge.EdgeStore`). Defaults to the
+            in-memory numpy store.
     """
 
     def __init__(
@@ -112,12 +115,13 @@ class LocalLociClient:
         retention_policy: RetentionPolicy | None = None,
         consolidation_policy: ConsolidationPolicy | None = None,
         collection_prefix: str = "",
+        store: MemoryStore | Any | None = None,
     ) -> None:
         if epoch_size_ms <= 0:
             raise ValueError(f"epoch_size_ms must be positive, got {epoch_size_ms}")
         if distance not in {"cosine", "dot", "euclidean"}:
             raise ValueError("distance must be one of ['cosine', 'dot', 'euclidean']")
-        self._store = MemoryStore()
+        self._store = store if store is not None else MemoryStore()
         self._epoch_size_ms = epoch_size_ms
         self._spatial_resolution = spatial_resolution
         self._vector_size = vector_size
@@ -752,6 +756,9 @@ class LocalLociClient:
             _payload_to_state(hit["payload"], hit["id"], hit["vector"])
             for hit in [*existing, *raw_hits]
         ]
+        # Backends differ in scroll order (numpy: insertion, Edge: ID order); a
+        # canonical order keeps the k-means result independent of the store.
+        combined.sort(key=lambda s: (s.scene_id, s.timestamp_ms, s.x, s.y, s.z, tuple(s.vector)))
         summaries = consolidate_states(combined, policy, seed=ep)
         self._store.delete_points_in_time_range(self._summary_collection, t_min, t_max + 1)
         if summaries:
