@@ -67,15 +67,33 @@ class EdgeMemoryStore:
         epoch_size_ms: int = 5000,
         resolutions: list[int] | None = None,
         mirror_path: str | Path | None = None,
+        quantization: str | None = None,
+        vectors_on_disk: bool = False,
+        indexing_threshold_kb: int | None = None,
     ) -> None:
         self.device_id = device_id
         self.vector_size = vector_size
         self._epoch_size_ms = epoch_size_ms
         self._hilbert = HilbertIndex(resolutions or [4, 8, 12])
         self._bm25 = qe.Bm25(qe.Bm25Config())
+        self.quantization = quantization
+        self._search_params = _search_params(quantization)
         self._cfg = qe.EdgeConfig(
-            vectors={"dense": qe.EdgeVectorParams(size=vector_size, distance=qe.Distance.Cosine)},
+            vectors={
+                "dense": qe.EdgeVectorParams(
+                    size=vector_size,
+                    distance=qe.Distance.Cosine,
+                    on_disk=vectors_on_disk or None,
+                    quantization_config=_quantization_config(quantization),
+                )
+            },
             sparse_vectors={"bm25": qe.EdgeSparseVectorParams(modifier=qe.Modifier.Idf)},
+            # Segments smaller than this (in KB of vectors) stay unindexed and unquantized.
+            optimizers=(
+                qe.EdgeOptimizersConfig(indexing_threshold=indexing_threshold_kb)
+                if indexing_threshold_kb is not None
+                else None
+            ),
         )
         self._shard = self._open_shard(Path(path))
         # The mirror holds other devices' memories pulled from the cloud. Local
@@ -186,7 +204,9 @@ class EdgeMemoryStore:
         pool = max(limit * 3, 20)
         merged: dict[str, SearchHit] = {}
         for source, shard in shards:  # local first, so it wins duplicate IDs
-            req = qe.QueryRequest(query=query, filter=flt, limit=pool, with_payload=True)
+            req = qe.QueryRequest(
+                query=query, filter=flt, limit=pool, with_payload=True, params=self._search_params
+            )
             for h in shard.query(req):
                 merged.setdefault(
                     str(h.id), SearchHit(str(h.id), float(h.score), dict(h.payload or {}), source)
@@ -374,6 +394,31 @@ class EdgeMemoryStore:
             if shard is not None:
                 shard.flush()
                 shard.close()
+
+
+def _quantization_config(mode: str | None) -> Any:
+    """Quantized copies of the dense vectors (originals are kept for rescoring).
+
+    * ``"scalar"``: int8, 4x smaller vectors in RAM;
+    * ``"binary"``: 1 bit per dimension, 32x smaller vectors in RAM (best with high dimensions).
+    """
+    if mode is None:
+        return None
+    if mode == "scalar":
+        return qe.ScalarQuantizationConfig(qe.ScalarType.Int8, quantile=0.99, always_ram=True)
+    if mode == "binary":
+        return qe.BinaryQuantizationConfig(always_ram=True)
+    raise ValueError(f"unknown quantization {mode!r}; use None, 'scalar' or 'binary'")
+
+
+def _search_params(mode: str | None) -> Any:
+    """Oversample and rescore with the original vectors so quantization costs little recall."""
+    if mode is None:
+        return None
+    oversampling = 3.0 if mode == "binary" else 2.0
+    return qe.SearchParams(
+        quantization=qe.QuantizationSearchParams(rescore=True, oversampling=oversampling)
+    )
 
 
 def _rrf(ranked_lists: list[list[SearchHit]], limit: int) -> list[SearchHit]:
