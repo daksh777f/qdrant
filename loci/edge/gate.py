@@ -19,9 +19,9 @@ Routes:
 * ``ABSTAIN``               nobody is confident (or nothing matches): no answer is given.
 
 ``answer_threshold`` was set from a measured sweep on the demo corpus with the hashed-BoW
-stand-in embedder (59 relevant queries: p5 0.63, min 0.30; 60 junk queries: max 0.34, none answered
-at any threshold in 0.4-0.6). A different embedder changes the cosine scale, so re-measure it
-(``similarity_ref`` is the knob) when you swap models.
+stand-in embedder and is re-checked by ``benchmarks/edge_verify.py`` (59 relevant queries: p5
+confidence 0.63; 60 junk queries: max 0.37; none answered). A different embedder changes the
+cosine scale, so re-measure it (``similarity_ref`` is the knob) when you swap models.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 
 @dataclass
 class GateConfig:
-    answer_threshold: float = 0.5  # measured: junk queries peak at 0.34, relevant p5 is 0.63
+    answer_threshold: float = 0.5  # measured: junk peaks at 0.37, relevant p5 is 0.63
     similarity_ref: float = 0.6  # cosine at which the similarity component saturates
     margin_ref: float = 0.2
     stale_after_ms: int = 24 * 3600 * 1000

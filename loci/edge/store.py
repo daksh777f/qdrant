@@ -141,7 +141,9 @@ class EdgeMemoryStore:
 
     def set_sync_state(self, ids: list[str], state: str) -> None:
         if ids:
-            self._shard.update(qe.UpdateOperation.set_payload(ids, {"sync_state": state}))
+            self._shard.update(
+                qe.UpdateOperation.set_payload(list[Any](ids), {"sync_state": state})
+            )
 
     # -- read ----------------------------------------------------------
 
@@ -252,7 +254,7 @@ class EdgeMemoryStore:
         *,
         current_only: bool = False,
     ) -> Any:
-        must = []
+        must: list[Any] = []
         if bounds is not None:
             buckets = self._hilbert.query_buckets(bounds)
             field_name = self._hilbert.payload_field()
@@ -263,7 +265,7 @@ class EdgeMemoryStore:
         if time_window_ms is not None:
             lo, hi = time_window_ms
             must.append(qe.FieldCondition("timestamp_ms", range=qe.RangeFloat(gte=lo, lte=hi)))
-        must_not = []
+        must_not: list[Any] = []
         if current_only:  # hide duplicates and superseded positions ("where is it now?")
             must_not.append(qe.FieldCondition("role", match=qe.MatchAny(list(_HIDDEN_ROLES))))
         if not must and not must_not:

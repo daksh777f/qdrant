@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import zlib
+from typing import cast
 
 import numpy as np
 
@@ -33,7 +34,7 @@ class HashEmbedder:
     def embed(self, text: str) -> np.ndarray:
         toks = _TOKEN.findall(text.lower()) or [text.lower() or "empty"]
         v = np.sum([self._token(t) for t in toks], axis=0)
-        return v / np.linalg.norm(v)
+        return cast("np.ndarray", v / np.linalg.norm(v))
 
     def __call__(self, text: str) -> list[float]:
-        return self.embed(text).tolist()
+        return cast("list[float]", self.embed(text).tolist())

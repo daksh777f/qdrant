@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import qdrant_edge as qe
 
@@ -38,6 +38,16 @@ class Link:
     def require(self) -> None:
         if not self.up:
             raise LinkDown("network link is down")
+
+
+def _ids(ids: list[str]) -> list[Any]:
+    """Edge takes ``list[int | UUID | str]``; ``list`` is invariant, so widen explicitly."""
+    return list(ids)
+
+
+def _dense(vec: Any) -> list[float]:
+    """The dense vector from an Edge record (named-vector dict or bare list)."""
+    return list(vec["dense"]) if isinstance(vec, dict) else list(vec)
 
 
 def wire_bytes(point: dict) -> int:
@@ -70,6 +80,10 @@ class CloudStore(Protocol):
 
     def get(self, ids: list[str]) -> list[dict]:
         """Fetch ``{id, vector, payload}`` for the given IDs."""
+        ...
+
+    def search(self, vector: list[float], limit: int = 8, *, current_only: bool = False) -> Any:
+        """Nearest neighbours as ``[{id, score, vector, payload}]``."""
         ...
 
 
@@ -135,7 +149,7 @@ class LocalCloud:
         existing = {
             str(r.id): r.payload or {}
             for r in self._shard.retrieve(
-                [p["id"] for p in points], with_payload=True, with_vector=False
+                _ids([p["id"] for p in points]), with_payload=True, with_vector=False
             )
         }
         ops = []
@@ -190,8 +204,9 @@ class LocalCloud:
         self._link.require()
         out = []
         for r in self._scan_payloads(with_vector=True):
-            vec = r.vector["dense"] if isinstance(r.vector, dict) else r.vector
-            out.append({"id": str(r.id), "vector": list(vec), "payload": dict(r.payload or {})})
+            out.append(
+                {"id": str(r.id), "vector": _dense(r.vector), "payload": dict(r.payload or {})}
+            )
         return out
 
     def search(self, vector: list[float], limit: int = 8, *, current_only: bool = False):
@@ -211,12 +226,11 @@ class LocalCloud:
         )
         out = []
         for h in self._shard.query(req):
-            vec = h.vector["dense"] if isinstance(h.vector, dict) else h.vector
             out.append(
                 {
                     "id": str(h.id),
                     "score": float(h.score),
-                    "vector": list(vec),
+                    "vector": _dense(h.vector),
                     "payload": dict(h.payload or {}),
                 }
             )
@@ -226,7 +240,7 @@ class LocalCloud:
         """Write reconciler output (role fields) and bump each point's role revision."""
         current = {
             str(r.id): r.payload or {}
-            for r in self._shard.retrieve(list(updates), with_payload=True, with_vector=False)
+            for r in self._shard.retrieve(_ids(list(updates)), with_payload=True, with_vector=False)
         }
         n = 0
         for pid, fields in updates.items():
@@ -246,9 +260,10 @@ class LocalCloud:
     def get(self, ids: list[str]) -> list[dict]:
         self._link.require()
         out = []
-        for r in self._shard.retrieve(ids, with_payload=True, with_vector=True):
-            vec = r.vector["dense"] if isinstance(r.vector, dict) else r.vector
-            out.append({"id": str(r.id), "vector": list(vec), "payload": dict(r.payload or {})})
+        for r in self._shard.retrieve(_ids(ids), with_payload=True, with_vector=True):
+            out.append(
+                {"id": str(r.id), "vector": _dense(r.vector), "payload": dict(r.payload or {})}
+            )
         return out
 
     def close(self) -> None:

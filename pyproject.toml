@@ -151,5 +151,11 @@ module = [
     # Optional native Rust extension: not installed in environments without the
     # `native` dependency group (e.g. the CI typecheck job) and ships no stubs.
     "loci_core",
+    # Optional extras (`edge`, `edge-ui`): not installed in the CI typecheck job.
+    "qdrant_edge",
+    "fastapi",
+    "fastapi.*",
+    "uvicorn",
+    "pydantic",
 ]
 ignore_missing_imports = true

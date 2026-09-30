@@ -23,7 +23,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,7 +60,7 @@ class LLMClient:
     timeout: float = 8.0
 
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> LLMClient | None:
+    def from_env(cls, env: Mapping[str, str] | None = None) -> LLMClient | None:
         env = os.environ if env is None else env
         if env.get("LOCI_LLM_BASE_URL") and env.get("LOCI_LLM_API_KEY"):
             return cls(

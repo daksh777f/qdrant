@@ -43,7 +43,7 @@ class Outbox:
         self._db.commit()
         self._base = backoff_base_s
         self._cap = backoff_cap_s
-        self._rng = rng or random.Random()  # noqa: S311 - retry jitter, not security
+        self._rng = rng or random.Random()  # noqa: S311  # nosec B311 - retry jitter, not security
 
     def enqueue(self, point_id: str, decision: str = "SYNC_NOW", now_ms: int | None = None) -> None:
         now = now_ms if now_ms is not None else int(time.time() * 1000)
